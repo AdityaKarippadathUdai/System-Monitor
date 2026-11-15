@@ -107,16 +107,20 @@ npm run tauri build -- --bundles deb,appimage
 #   src-tauri/target/release/bundle/appimage/*.AppImage
 ```
 
-Build on **Windows** to generate `.msi` and `.exe` (NSIS) installers:
-```bash
-npm run tauri build -- --bundles msi,nsis
+Build on **Windows 10 / 11 (x64)** with Rust MSVC, Node.js, and WebView2 to generate the standalone **NSIS `.exe`** and **`.msi`** installers:
+```powershell
+npm install
+npm run tauri build
+# Or build only the NSIS .exe setup installer:
+npm run tauri build -- --bundles nsis
 # Outputs:
-#   src-tauri/target/release/bundle/msi/*.msi
-#   src-tauri/target/release/bundle/nsis/*.exe
+#   src-tauri/target/release/bundle/nsis/SysMon Pro_1.3.0_x64-setup.exe
+#   src-tauri/target/release/bundle/msi/SysMon Pro_1.3.0_x64_en-US.msi
 ```
 
-### Automated CI Builds
-`.github/workflows/build.yml` runs independent `build-linux` (`ubuntu-22.04`) and `build-windows` (`windows-latest`) jobs on pushes and pull requests, verifying TypeScript (`npm run lint`), Rust native compilation (`cargo check`), and building platform installers as downloadable workflow artifacts.
+### Automated CI Builds (Linux & Windows)
+- **`.github/workflows/build-windows.yml`**: Runs natively on `windows-latest` (`x86_64-pc-windows-msvc`), ensures NSIS is installed, verifies TypeScript + Rust compilation, builds the standalone Windows x64 `.exe` (NSIS) and `.msi` installers, uploads `SysMon-Pro-Windows-x64-Setup` as a downloadable artifact, and automatically publishes a GitHub Release when a `v*` tag is pushed.
+- **`.github/workflows/build.yml`**: Runs natively on `ubuntu-22.04` to produce `.deb` and `.AppImage` packages.
 
 ---
 

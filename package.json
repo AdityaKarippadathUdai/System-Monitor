@@ -8,6 +8,7 @@
     "dev": "tsx server.ts",
     "tauri": "tauri",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build:windows": "npm run tauri build -- --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis",
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
