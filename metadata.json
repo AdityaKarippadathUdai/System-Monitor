@@ -1,0 +1,8 @@
+{
+  "name": "Remix SysMon Pro",
+  "description": "A modern, developer-focused React dashboard for real-time monitoring of CPU, RAM, GPU, and system performance metrics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
