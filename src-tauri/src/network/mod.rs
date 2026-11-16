@@ -354,11 +354,11 @@ fn collect_windows_ifaces() -> HashMap<String, OsInterfaceMeta> {
                 let sa = u.Address.lpSockaddr;
                 if !sa.is_null() {
                     let family = (*sa).sa_family;
-                    if family == AF_INET.0 && ip4.is_none() {
+                    if family == AF_INET && ip4.is_none() {
                         let sa_in = &*(sa as *const SOCKADDR_IN);
-                        let bytes = sa_in.sin_addr.S_un.S_un_b;
-                        ip4 = Some(format!("{}.{}.{}.{}", bytes.s1, bytes.s2, bytes.s3, bytes.s4));
-                    } else if family == AF_INET6.0 {
+                        let addr4 = std::net::Ipv4Addr::from(u32::from_be(sa_in.sin_addr.S_un.S_addr));
+                        ip4 = Some(addr4.to_string());
+                    } else if family == AF_INET6 {
                         let sa_in6 = &*(sa as *const SOCKADDR_IN6);
                         let addr6 = std::net::Ipv6Addr::from(sa_in6.sin6_addr.u.Byte);
                         if ip6.is_none() || ip6.as_deref().map(|s| s.starts_with("fe80:")).unwrap_or(false) {

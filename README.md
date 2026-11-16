@@ -98,29 +98,159 @@ Starts the Express + Vite server at `http://localhost:3000` with REST endpoints:
 npm run tauri dev
 ```
 
-### Production Bundles (Platform Independent)
-Build on **Linux** to generate `.deb` and `.AppImage` packages:
-```bash
-npm run tauri build -- --bundles deb,appimage
-# Outputs:
-#   src-tauri/target/release/bundle/deb/*.deb
-#   src-tauri/target/release/bundle/appimage/*.AppImage
-```
+### Production Installers (`.deb` and `.exe`) — Quick Reference
 
-Build on **Windows 10 / 11 (x64)** with Rust MSVC, Node.js, and WebView2 to generate the standalone **NSIS `.exe`** and **`.msi`** installers:
-```powershell
-npm install
-npm run tauri build
-# Or build only the NSIS .exe setup installer:
-npm run tauri build -- --bundles nsis
-# Outputs:
-#   src-tauri/target/release/bundle/nsis/SysMon Pro_1.3.0_x64-setup.exe
-#   src-tauri/target/release/bundle/msi/SysMon Pro_1.3.0_x64_en-US.msi
-```
+| Target Package | Host OS | Command | Output File |
+|---|---|---|---|
+| **Linux `.deb`** | Ubuntu / Debian | `npm run tauri build -- --bundles deb` | `src-tauri/target/release/bundle/deb/SysMon Pro_1.3.0_amd64.deb` |
+| **Linux `.deb` + `.AppImage`** | Linux | `npm run tauri build` | `src-tauri/target/release/bundle/deb/*.deb` & `appimage/*.AppImage` |
+| **Windows `.exe` (Cross-Compile)** | Ubuntu / Debian | `npm run build:windows` | `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/SysMon Pro_1.3.0_x64-setup.exe` |
+| **Windows `.exe` (Native)** | Windows 10 / 11 | `npm run tauri build -- --bundles nsis` | `src-tauri\target\release\bundle\nsis\SysMon Pro_1.3.0_x64-setup.exe` |
+| **Windows `.exe` + `.msi`** | Windows 10 / 11 | `npm run tauri build` | `nsis\*-setup.exe` & `msi\*_x64_en-US.msi` |
 
-### Automated CI Builds (Linux & Windows)
-- **`.github/workflows/build-windows.yml`**: Runs natively on `windows-latest` (`x86_64-pc-windows-msvc`), ensures NSIS is installed, verifies TypeScript + Rust compilation, builds the standalone Windows x64 `.exe` (NSIS) and `.msi` installers, uploads `SysMon-Pro-Windows-x64-Setup` as a downloadable artifact, and automatically publishes a GitHub Release when a `v*` tag is pushed.
-- **`.github/workflows/build.yml`**: Runs natively on `ubuntu-22.04` to produce `.deb` and `.AppImage` packages.
+---
+
+### Option 1: Creating a Linux `.deb` Package (Ubuntu / Debian)
+
+> **Requirement**: Building `.deb` packages requires running on Linux with WebKitGTK and Tauri system libraries installed.
+
+1. **Install system dependencies** (Ubuntu / Debian):
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y \
+     libwebkit2gtk-4.1-dev \
+     build-essential \
+     curl \
+     wget \
+     file \
+     libxdo-dev \
+     libssl-dev \
+     libayatana-appindicator3-dev \
+     librsvg2-dev \
+     patchelf \
+     libfuse2
+   ```
+
+2. **Install Rust** (skip if already installed):
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+   source "$HOME/.cargo/env"
+   ```
+
+3. **Install Node dependencies and build the `.deb` installer**:
+   ```bash
+   npm install
+   npm run tauri build -- --bundles deb
+   ```
+   *(To build both `.deb` and `.AppImage` at once, run `npm run tauri build` — `src-tauri/tauri.linux.conf.json` configures both targets automatically on Linux.)*
+
+4. **Locate, verify, and install the generated `.deb` file**:
+   ```bash
+   # Inspect generated .deb package
+   ls -lh src-tauri/target/release/bundle/deb/*.deb
+   dpkg-deb --info src-tauri/target/release/bundle/deb/*.deb
+
+   # Install locally on Ubuntu / Debian
+   sudo apt install ./src-tauri/target/release/bundle/deb/*.deb
+   ```
+   After installation, launch **SysMon Pro** from your application menu or run `sysmon-desktop` in a terminal. To uninstall later:
+   ```bash
+   sudo apt remove sysmon-desktop
+   ```
+
+---
+
+### Option 2: Creating a Windows `.exe` Installer from Ubuntu / Debian Linux (`cargo-xwin`)
+
+You can cross-compile a standalone **Windows 10/11 x64 NSIS `.exe` setup installer** directly from Ubuntu/Debian Linux without a Windows machine.
+
+1. **Run the automated cross-compilation setup script**:
+   ```bash
+   chmod +x scripts/setup-windows-cross-compile.sh
+   ./scripts/setup-windows-cross-compile.sh
+   ```
+   This script checks existing tools (without overwriting system configs) and installs any missing requirements:
+   - `llvm`, `clang`, `lld`, and `nsis` (`makensis`)
+   - Rust stable toolchain + `x86_64-pc-windows-msvc` target
+   - `cargo-xwin` (for Windows CRT & Windows SDK headers/import libraries)
+
+   If you just installed Rust in this terminal session, reload your `PATH`:
+   ```bash
+   source "$HOME/.cargo/env"
+   ```
+
+2. **Install npm dependencies**:
+   ```bash
+   npm install
+   ```
+
+3. **(Optional) Verify TypeScript and Rust Windows cross-compilation first**:
+   ```bash
+   npm run lint
+   (cd src-tauri && cargo xwin check --target x86_64-pc-windows-msvc)
+   ```
+
+4. **Build the Windows x64 `.exe` installer**:
+   ```bash
+   npm run build:windows
+   ```
+   Under the hood, this runs:
+   `npm run tauri build -- --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis`
+   - Builds the React 19 + Vite production frontend (`dist/`).
+   - Cross-compiles the native Rust monitoring engine for Windows x64 (`x86_64-pc-windows-msvc`).
+   - Downloads/caches Microsoft CRT & Windows SDK files into `~/.cache/cargo-xwin/xwin` on first run.
+   - Packages the standalone NSIS `.exe` installer (with embedded WebView2 bootstrapper and `src-tauri/icons/icon.ico`).
+
+5. **Locate and verify the generated `.exe` installer**:
+   ```bash
+   ls -lh "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/"*.exe
+   file "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/"*.exe
+   # Expected output file:
+   #   src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/SysMon Pro_1.3.0_x64-setup.exe
+   #   (PE32+ executable (GUI) x86-64, for MS Windows)
+   ```
+   Copy the `.exe` to any Windows 10 or Windows 11 x64 PC and double-click it to install **SysMon Pro** (no Node.js or Rust needed on the target PC).
+
+   **Troubleshooting Linux-to-Windows cross-compilation**:
+   - `cargo: command not found` or `cargo-xwin not found`: run `source "$HOME/.cargo/env"`.
+   - Low-memory build machine: limit parallel Rust jobs via `CARGO_BUILD_JOBS=2 npm run build:windows`.
+   - `makensis` missing: run `sudo apt-get install -y nsis`.
+
+---
+
+### Option 3: Creating a Windows `.exe` (and `.msi`) Natively on Windows 10 / 11
+
+1. **Install prerequisites** on Windows 10/11 (x64):
+   - [Node.js](https://nodejs.org/) (`v18+`)
+   - [Rustup (`x86_64-pc-windows-msvc`)](https://rustup.rs/)
+   - [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (**Desktop development with C++** + Windows 10/11 SDK)
+   - [NSIS](https://nsis.sourceforge.io/) (or let Tauri CLI fetch/use its bundled NSIS toolchain)
+
+2. **Install dependencies and build**:
+   ```powershell
+   npm install
+
+   # Build ONLY the NSIS .exe installer:
+   npm run tauri build -- --bundles nsis
+
+   # OR build both NSIS (.exe) and WiX (.msi) installers:
+   npm run tauri build
+   ```
+
+3. **Locate the generated installers**:
+   ```text
+   src-tauri\target\release\bundle\nsis\SysMon Pro_1.3.0_x64-setup.exe
+   src-tauri\target\release\bundle\msi\SysMon Pro_1.3.0_x64_en-US.msi
+   ```
+
+---
+
+### Option 4: Automated CI Builds via GitHub Actions
+
+Two GitHub Actions workflows build downloadable `.deb` and `.exe` installers automatically on pushes to `main`/`master`, pull requests, manual runs (`workflow_dispatch`), and `v*` tags:
+
+- **`.github/workflows/build.yml`** (`ubuntu-22.04`): Builds `.deb` and `.AppImage` and uploads the `SysMon-Pro-Linux-x64` artifact.
+- **`.github/workflows/build-windows.yml`** (`windows-latest`): Builds NSIS `.exe` and `.msi`, uploads the `SysMon-Pro-Windows-x64-Setup` artifact, and attaches both installers to a **GitHub Release** whenever you push a version tag (e.g. `git tag v1.3.0 && git push origin v1.3.0`).
 
 ---
 

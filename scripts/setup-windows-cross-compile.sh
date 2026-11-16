@@ -94,8 +94,35 @@ if cargo xwin --version >/dev/null 2>&1 || command -v cargo-xwin >/dev/null 2>&1
   echo "[ok] cargo-xwin already installed: $(cargo xwin --version 2>/dev/null || cargo-xwin --version)"
 else
   echo "[..] Installing cargo-xwin..."
-  cargo install --locked cargo-xwin
+  CARGO_XWIN_INSTALLED=0
+  ARCH="$(uname -m)"
+  if [ "$ARCH" = "x86_64" ]; then
+    XWIN_ARCHIVE="cargo-xwin-v0.23.1.x86_64-unknown-linux-musl.tar.gz"
+  elif [ "$ARCH" = "aarch64" ]; then
+    XWIN_ARCHIVE="cargo-xwin-v0.23.1.aarch64-unknown-linux-musl.tar.gz"
+  else
+    XWIN_ARCHIVE=""
+  fi
+
+  if [ -n "$XWIN_ARCHIVE" ]; then
+    TMP_XWIN="$(mktemp -d)"
+    if curl -fsSL "https://github.com/rust-cross/cargo-xwin/releases/download/v0.23.1/${XWIN_ARCHIVE}" -o "$TMP_XWIN/${XWIN_ARCHIVE}" \
+      && tar -xzf "$TMP_XWIN/${XWIN_ARCHIVE}" -C "$HOME/.cargo/bin" cargo-xwin \
+      && chmod +x "$HOME/.cargo/bin/cargo-xwin"; then
+      echo "[ok] Installed prebuilt cargo-xwin: $(cargo xwin --version 2>/dev/null || echo 'v0.23.1')"
+      CARGO_XWIN_INSTALLED=1
+    fi
+    rm -rf "$TMP_XWIN"
+  fi
+
+  if [ "$CARGO_XWIN_INSTALLED" -eq 0 ]; then
+    echo "[..] Falling back to building cargo-xwin from crates.io (bounded parallelism)..."
+    cargo install --locked -j "${CARGO_BUILD_JOBS:-2}" cargo-xwin
+  fi
 fi
+
+# Note: cargo-xwin downloads and caches the Windows CRT & Windows SDK into
+# ~/.cache/cargo-xwin/xwin automatically on the first cross-compilation build.
 
 # 7. Also check Linux Tauri WebKitGTK development libraries (informational, non-destructive)
 echo ""
