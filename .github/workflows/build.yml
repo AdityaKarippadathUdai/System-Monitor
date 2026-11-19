@@ -14,13 +14,13 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
-          cache: npm
+          node-version: 22
+          cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}
 
       - name: Setup Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -47,7 +47,12 @@ jobs:
             libfuse2
 
       - name: Install npm dependencies
-        run: npm ci || npm install
+        run: |
+          if [ -f "package-lock.json" ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: TypeScript typecheck
         run: npm run lint
@@ -60,7 +65,7 @@ jobs:
         run: npm run tauri build -- --bundles deb,appimage
 
       - name: Upload Linux installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: SysMon-Pro-Linux-x64
           path: |
