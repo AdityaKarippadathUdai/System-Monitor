@@ -89,6 +89,13 @@ export const ProcessTable: React.FC<ProcessTableProps> = ({
             zombie
           </span>
         );
+      case 'unknown':
+      default:
+        return (
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono-num font-medium bg-slate-800/70 text-slate-500 border border-slate-700/50">
+            unknown
+          </span>
+        );
     }
   };
 

@@ -1,4 +1,4 @@
-export type ProcessStatus = 'running' | 'sleeping' | 'stopped' | 'zombie';
+export type ProcessStatus = 'running' | 'sleeping' | 'stopped' | 'zombie' | 'unknown';
 export type ProcessCategory = 'all' | 'app' | 'background' | 'system';
 
 export interface ProcessMetricHistory {

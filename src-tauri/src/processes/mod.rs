@@ -221,11 +221,15 @@ impl ProcessMonitor {
 
 fn map_process_status(status: ProcessStatus) -> String {
     match status {
-        ProcessStatus::Run => "running".to_string(),
-        ProcessStatus::Sleep | ProcessStatus::Idle | ProcessStatus::Wake => "sleeping".to_string(),
+        ProcessStatus::Run | ProcessStatus::Waking => "running".to_string(),
+        ProcessStatus::Sleep
+        | ProcessStatus::Idle
+        | ProcessStatus::Parked
+        | ProcessStatus::LockBlocked
+        | ProcessStatus::UninterruptibleDiskSleep => "sleeping".to_string(),
         ProcessStatus::Stop | ProcessStatus::Tracing => "stopped".to_string(),
         ProcessStatus::Zombie | ProcessStatus::Dead => "zombie".to_string(),
-        _ => "running".to_string(),
+        ProcessStatus::Wakekill | ProcessStatus::Unknown(_) => "unknown".to_string(),
     }
 }
 

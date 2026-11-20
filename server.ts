@@ -525,15 +525,19 @@ app.get('/api/system/processes', async (_req, res) => {
         ? 'background'
         : 'app';
 
-      const statusMap: Record<string, 'running' | 'sleeping' | 'stopped' | 'zombie'> = {
+      const statusMap: Record<string, 'running' | 'sleeping' | 'stopped' | 'zombie' | 'unknown'> = {
         running: 'running',
         R: 'running',
         sleeping: 'sleeping',
         S: 'sleeping',
+        D: 'sleeping',
+        I: 'sleeping',
         stopped: 'stopped',
         T: 'stopped',
+        t: 'stopped',
         zombie: 'zombie',
         Z: 'zombie',
+        unknown: 'unknown',
       };
 
       return {
@@ -552,7 +556,7 @@ app.get('/api/system/processes', async (_req, res) => {
         diskWriteBytesSec: 0,
         netRxBytesSec: null,
         netTxBytesSec: null,
-        status: statusMap[p.state] || 'running',
+        status: statusMap[p.state] || 'unknown',
         category,
         startTime: p.started || 'Active',
         threads: null,
