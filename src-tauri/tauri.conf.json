@@ -39,7 +39,7 @@
     "targets": ["nsis", "msi"],
     "publisher": "SysMon Pro",
     "copyright": "Copyright (c) 2026 SysMon Pro Contributors",
-    "category": "System",
+    "category": "Utility",
     "shortDescription": "Cross-platform hardware telemetry and process monitor",
     "longDescription": "SysMon Pro is a native cross-platform desktop hardware monitor for Windows 10/11 and Linux providing real-time CPU, RAM, multi-GPU, disk, network, and process telemetry.",
     "icon": [

@@ -49,13 +49,16 @@ jobs:
       - name: Install npm dependencies
         run: |
           if [ -f "package-lock.json" ]; then
-            npm ci
+            npm ci --include=optional
           else
-            npm install
+            npm install --include=optional
           fi
 
       - name: TypeScript typecheck
         run: npm run lint
+
+      - name: Build application
+        run: npm run build
 
       - name: Verify Rust Linux compilation
         working-directory: src-tauri

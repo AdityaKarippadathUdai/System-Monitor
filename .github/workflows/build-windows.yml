@@ -23,7 +23,6 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}
 
       - name: Setup Rust stable MSVC toolchain (x64)
         uses: dtolnay/rust-toolchain@stable
@@ -47,17 +46,24 @@ jobs:
           }
           makensis -VERSION
 
-      - name: Install npm dependencies
+      - name: Clean npm installation
         shell: pwsh
         run: |
+          Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
           if (Test-Path "package-lock.json") {
-            npm ci
+            npm ci --include=optional
           } else {
-            npm install
+            npm install --include=optional
           }
+
+      - name: Verify Rollup installation
+        run: npm ls rollup @rollup/rollup-win32-x64-msvc
 
       - name: TypeScript typecheck
         run: npm run lint
+
+      - name: Build application
+        run: npm run build
 
       - name: Verify Rust Windows compilation
         working-directory: src-tauri
