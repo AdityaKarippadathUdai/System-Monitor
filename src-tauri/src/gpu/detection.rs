@@ -74,10 +74,15 @@ pub fn collect_linux_gpus(nvidia: &mut NvidiaMonitor) -> Vec<GpuStats> {
 }
 
 #[cfg(target_os = "windows")]
+type PdhQuery = isize;
+#[cfg(target_os = "windows")]
+type PdhCounter = isize;
+
+#[cfg(target_os = "windows")]
 pub struct WindowsGpuPdhMonitor {
-    query: Option<windows::Win32::System::Performance::PDH_HQUERY>,
-    engine_counters: Vec<(String, windows::Win32::System::Performance::PDH_HCOUNTER)>,
-    mem_counters: Vec<(String, windows::Win32::System::Performance::PDH_HCOUNTER)>,
+    query: Option<PdhQuery>,
+    engine_counters: Vec<(String, PdhCounter)>,
+    mem_counters: Vec<(String, PdhCounter)>,
     last_refresh: std::time::Instant,
     initialized_sample: bool,
 }
@@ -103,7 +108,7 @@ impl WindowsGpuPdhMonitor {
 
     fn rebuild_query(&mut self) {
         use windows::core::{w, PCWSTR};
-        use windows::Win32::System::Performance::{PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhOpenQueryW, PDH_HCOUNTER, PDH_HQUERY};
+        use windows::Win32::System::Performance::{PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhOpenQueryW};
 
         if let Some(q) = self.query.take() {
             unsafe {
@@ -115,7 +120,7 @@ impl WindowsGpuPdhMonitor {
         self.initialized_sample = false;
 
         unsafe {
-            let mut query = PDH_HQUERY::default();
+            let mut query: PdhQuery = 0;
             if PdhOpenQueryW(PCWSTR::null(), 0, &mut query) != 0 {
                 return;
             }
@@ -124,7 +129,7 @@ impl WindowsGpuPdhMonitor {
             for path in engine_paths.into_iter().take(128) {
                 if let Some(luid_key) = extract_luid_token(&path) {
                     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-                    let mut counter = PDH_HCOUNTER::default();
+                    let mut counter: PdhCounter = 0;
                     if PdhAddEnglishCounterW(query, PCWSTR(wide.as_ptr()), 0, &mut counter) == 0 {
                         self.engine_counters.push((luid_key, counter));
                     }
@@ -135,7 +140,7 @@ impl WindowsGpuPdhMonitor {
             for path in mem_paths.into_iter().take(16) {
                 if let Some(luid_key) = extract_luid_token(&path) {
                     let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-                    let mut counter = PDH_HCOUNTER::default();
+                    let mut counter: PdhCounter = 0;
                     if PdhAddEnglishCounterW(query, PCWSTR(wide.as_ptr()), 0, &mut counter) == 0 {
                         self.mem_counters.push((luid_key, counter));
                     }
@@ -299,10 +304,10 @@ pub fn collect_windows_gpus(
     nvidia: &mut NvidiaMonitor,
     win_pdh: &mut WindowsGpuPdhMonitor,
 ) -> Vec<GpuStats> {
-    use windows::core::Interface;
+    use windows::core::ComInterface;
     use windows::Win32::Graphics::Dxgi::{
-        CreateDXGIFactory1, IDXGIAdapter3, IDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE,
-        DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO,
+        CreateDXGIFactory1, IDXGIAdapter3, IDXGIFactory1, DXGI_ADAPTER_DESC1,
+        DXGI_ADAPTER_FLAG_SOFTWARE, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO,
     };
 
     let mut nv_gpus = nvidia.collect();
@@ -315,10 +320,10 @@ pub fn collect_windows_gpus(
             let mut idx = 0u32;
             while let Ok(adapter) = factory.EnumAdapters1(idx) {
                 idx += 1;
-                let desc = match adapter.GetDesc1() {
-                    Ok(d) => d,
-                    Err(_) => continue,
-                };
+                let mut desc = DXGI_ADAPTER_DESC1::default();
+                if adapter.GetDesc1(&mut desc).is_err() {
+                    continue;
+                }
 
                 // Skip Microsoft Basic Render Driver / software adapters
                 if (desc.Flags & (DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32)) != 0

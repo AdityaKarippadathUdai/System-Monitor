@@ -4,23 +4,22 @@ use std::ffi::c_void;
 use sysinfo::Components;
 use windows::{
     core::{w, PCWSTR},
-    Win32::{
-        Foundation::ERROR_SUCCESS,
-        System::{
-            Performance::{
-                PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData,
-                PdhGetFormattedCounterValue, PdhOpenQueryW, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE,
-                PDH_HCOUNTER, PDH_HQUERY,
-            },
-            Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW},
+    Win32::System::{
+        Performance::{
+            PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData,
+            PdhGetFormattedCounterValue, PdhOpenQueryW, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE,
         },
+        Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RegGetValueW},
     },
 };
 
+type PdhQuery = isize;
+type PdhCounter = isize;
+
 pub struct WindowsCpuMonitor {
-    query: Option<PDH_HQUERY>,
-    perf_counter: Option<PDH_HCOUNTER>,
-    temp_counter: Option<PDH_HCOUNTER>,
+    query: Option<PdhQuery>,
+    perf_counter: Option<PdhCounter>,
+    temp_counter: Option<PdhCounter>,
     base_mhz: Option<u32>,
     vendor_id: Option<String>,
     initialized_sample: bool,
@@ -36,9 +35,9 @@ impl WindowsCpuMonitor {
         let base_mhz = read_hklm_dword(cpu_key, w!("~MHz"));
         let vendor_id = read_hklm_string(cpu_key, w!("VendorIdentifier"));
 
-        let mut query = PDH_HQUERY::default();
-        let mut perf_counter = PDH_HCOUNTER::default();
-        let mut temp_counter = PDH_HCOUNTER::default();
+        let mut query: PdhQuery = 0;
+        let mut perf_counter: PdhCounter = 0;
+        let mut temp_counter: PdhCounter = 0;
 
         let (q_opt, p_opt, t_opt) = unsafe {
             if PdhOpenQueryW(PCWSTR::null(), 0, &mut query) == 0 {
@@ -168,7 +167,7 @@ fn read_hklm_dword(sub_key: PCWSTR, value_name: PCWSTR) -> Option<u32> {
     unsafe {
         let mut val: u32 = 0;
         let mut cb_data: u32 = std::mem::size_of::<u32>() as u32;
-        let status = RegGetValueW(
+        if RegGetValueW(
             HKEY_LOCAL_MACHINE,
             sub_key,
             value_name,
@@ -176,8 +175,10 @@ fn read_hklm_dword(sub_key: PCWSTR, value_name: PCWSTR) -> Option<u32> {
             None,
             Some(&mut val as *mut u32 as *mut c_void),
             Some(&mut cb_data),
-        );
-        if status == ERROR_SUCCESS && val > 0 {
+        )
+        .is_ok()
+            && val > 0
+        {
             Some(val)
         } else {
             None
@@ -188,7 +189,7 @@ fn read_hklm_dword(sub_key: PCWSTR, value_name: PCWSTR) -> Option<u32> {
 fn read_hklm_string(sub_key: PCWSTR, value_name: PCWSTR) -> Option<String> {
     unsafe {
         let mut cb_data: u32 = 0;
-        let status = RegGetValueW(
+        if RegGetValueW(
             HKEY_LOCAL_MACHINE,
             sub_key,
             value_name,
@@ -196,13 +197,15 @@ fn read_hklm_string(sub_key: PCWSTR, value_name: PCWSTR) -> Option<String> {
             None,
             None,
             Some(&mut cb_data),
-        );
-        if status != ERROR_SUCCESS || cb_data == 0 {
+        )
+        .is_err()
+            || cb_data == 0
+        {
             return None;
         }
         let buf_len = (cb_data as usize) / std::mem::size_of::<u16>() + 1;
         let mut buffer = vec![0u16; buf_len];
-        let status = RegGetValueW(
+        if RegGetValueW(
             HKEY_LOCAL_MACHINE,
             sub_key,
             value_name,
@@ -210,8 +213,9 @@ fn read_hklm_string(sub_key: PCWSTR, value_name: PCWSTR) -> Option<String> {
             None,
             Some(buffer.as_mut_ptr() as *mut c_void),
             Some(&mut cb_data),
-        );
-        if status != ERROR_SUCCESS {
+        )
+        .is_err()
+        {
             return None;
         }
         while let Some(&0) = buffer.last() {

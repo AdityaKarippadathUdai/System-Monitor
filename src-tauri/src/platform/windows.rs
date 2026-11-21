@@ -3,23 +3,19 @@ use std::ffi::c_void;
 use sysinfo::System;
 use windows::{
     core::{w, PCWSTR},
-    Win32::{
-        Foundation::ERROR_SUCCESS,
-        System::{
-            Performance::{
-                PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData,
-                PdhGetFormattedCounterValue, PdhOpenQueryW, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE,
-                PDH_HCOUNTER, PDH_HQUERY,
-            },
-            Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW},
+    Win32::System::{
+        Performance::{
+            PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData,
+            PdhGetFormattedCounterValue, PdhOpenQueryW, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE,
         },
+        Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW},
     },
 };
 
 fn read_hklm_string(sub_key: PCWSTR, value_name: PCWSTR) -> Option<String> {
     unsafe {
         let mut cb_data: u32 = 0;
-        let status = RegGetValueW(
+        if RegGetValueW(
             HKEY_LOCAL_MACHINE,
             sub_key,
             value_name,
@@ -27,14 +23,16 @@ fn read_hklm_string(sub_key: PCWSTR, value_name: PCWSTR) -> Option<String> {
             None,
             None,
             Some(&mut cb_data),
-        );
-        if status != ERROR_SUCCESS || cb_data == 0 {
+        )
+        .is_err()
+            || cb_data == 0
+        {
             return None;
         }
 
         let buf_len = (cb_data as usize) / std::mem::size_of::<u16>() + 1;
         let mut buffer = vec![0u16; buf_len];
-        let status = RegGetValueW(
+        if RegGetValueW(
             HKEY_LOCAL_MACHINE,
             sub_key,
             value_name,
@@ -42,8 +40,9 @@ fn read_hklm_string(sub_key: PCWSTR, value_name: PCWSTR) -> Option<String> {
             None,
             Some(buffer.as_mut_ptr() as *mut c_void),
             Some(&mut cb_data),
-        );
-        if status != ERROR_SUCCESS {
+        )
+        .is_err()
+        {
             return None;
         }
 
@@ -128,11 +127,11 @@ pub fn collect_static_info() -> PlatformStaticInfo {
 
 pub fn get_thread_count(_sys: &System) -> Option<usize> {
     unsafe {
-        let mut query = PDH_HQUERY::default();
+        let mut query: isize = 0;
         if PdhOpenQueryW(PCWSTR::null(), 0, &mut query) != 0 {
             return None;
         }
-        let mut counter = PDH_HCOUNTER::default();
+        let mut counter: isize = 0;
         let status = PdhAddEnglishCounterW(query, w!(r#"\System\Threads"#), 0, &mut counter);
         if status != 0 {
             let _ = PdhCloseQuery(query);

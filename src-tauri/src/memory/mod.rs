@@ -142,7 +142,7 @@ fn collect_windows_memory(sys: &System) -> MemoryStats {
     use windows::core::{w, PCWSTR};
     use windows::Win32::System::Performance::{
         PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterValue,
-        PdhOpenQueryW, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY,
+        PdhOpenQueryW, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE,
     };
     use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 
@@ -180,10 +180,10 @@ fn collect_windows_memory(sys: &System) -> MemoryStats {
     let mut pagefile_usage_pct: Option<f64> = None;
 
     unsafe {
-        let mut query = PDH_HQUERY::default();
+        let mut query: isize = 0;
         if PdhOpenQueryW(PCWSTR::null(), 0, &mut query) == 0 {
-            let mut cache_counter = PDH_HCOUNTER::default();
-            let mut page_counter = PDH_HCOUNTER::default();
+            let mut cache_counter: isize = 0;
+            let mut page_counter: isize = 0;
             let has_cache = PdhAddEnglishCounterW(
                 query,
                 w!(r#"\Memory\Cache Bytes"#),

@@ -330,16 +330,21 @@ struct DiskRate {
 }
 
 #[cfg(target_os = "windows")]
+type PdhQuery = isize;
+#[cfg(target_os = "windows")]
+type PdhCounter = isize;
+
+#[cfg(target_os = "windows")]
 struct DiskCounters {
-    read_bytes: windows::Win32::System::Performance::PDH_HCOUNTER,
-    write_bytes: windows::Win32::System::Performance::PDH_HCOUNTER,
-    read_ops: windows::Win32::System::Performance::PDH_HCOUNTER,
-    write_ops: windows::Win32::System::Performance::PDH_HCOUNTER,
+    read_bytes: PdhCounter,
+    write_bytes: PdhCounter,
+    read_ops: PdhCounter,
+    write_ops: PdhCounter,
 }
 
 #[cfg(target_os = "windows")]
 struct WindowsDiskPdhMonitor {
-    query: Option<windows::Win32::System::Performance::PDH_HQUERY>,
+    query: Option<PdhQuery>,
     counters: HashMap<String, DiskCounters>,
     last_refresh: Instant,
     initialized_sample: bool,
@@ -367,7 +372,6 @@ impl WindowsDiskPdhMonitor {
         use windows::core::{w, PCWSTR};
         use windows::Win32::System::Performance::{
             PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhOpenQueryW,
-            PDH_HCOUNTER, PDH_HQUERY,
         };
 
         if let Some(q) = self.query.take() {
@@ -379,7 +383,7 @@ impl WindowsDiskPdhMonitor {
         self.initialized_sample = false;
 
         unsafe {
-            let mut query = PDH_HQUERY::default();
+            let mut query: PdhQuery = 0;
             if PdhOpenQueryW(PCWSTR::null(), 0, &mut query) != 0 {
                 return;
             }
@@ -397,10 +401,10 @@ impl WindowsDiskPdhMonitor {
                             .collect()
                     };
 
-                    let mut rb = PDH_HCOUNTER::default();
-                    let mut wb = PDH_HCOUNTER::default();
-                    let mut ro = PDH_HCOUNTER::default();
-                    let mut wo = PDH_HCOUNTER::default();
+                    let mut rb: PdhCounter = 0;
+                    let mut wb: PdhCounter = 0;
+                    let mut ro: PdhCounter = 0;
+                    let mut wo: PdhCounter = 0;
 
                     let p1 = make_path("Disk Read Bytes/sec");
                     let p2 = make_path("Disk Write Bytes/sec");
@@ -445,7 +449,7 @@ impl WindowsDiskPdhMonitor {
             unsafe {
                 if PdhCollectQueryData(query) == 0 {
                     if self.initialized_sample {
-                        let read_val = |c: windows::Win32::System::Performance::PDH_HCOUNTER| -> f64 {
+                        let read_val = |c: PdhCounter| -> f64 {
                             let mut v = PDH_FMT_COUNTERVALUE::default();
                             if PdhGetFormattedCounterValue(c, PDH_FMT_DOUBLE, None, &mut v) == 0 {
                                 let d = v.Anonymous.doubleValue;
