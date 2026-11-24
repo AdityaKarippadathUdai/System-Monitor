@@ -1,0 +1,94 @@
+# Maintainer: Aditya Udai <adityaudai1322@gmail.com>
+pkgname=sysmon-pro
+pkgver=1.3.0
+pkgrel=1
+pkgdesc="Cross-platform real-time hardware telemetry and process monitoring desktop application"
+arch=('x86_64')
+url="https://github.com/AdityaKarippadathUdai/System-Monitor"
+license=('MIT')
+depends=(
+  'cairo'
+  'gcc-libs'
+  'gdk-pixbuf2'
+  'glib2'
+  'glibc'
+  'gtk3'
+  'hicolor-icon-theme'
+  'libayatana-appindicator'
+  'webkit2gtk-4.1'
+)
+optdepends=(
+  'nvidia-utils: NVIDIA GPU telemetry via NVML and nvidia-smi'
+  'iputils: native ICMP latency probing in Network Monitor'
+)
+makedepends=(
+  'cargo'
+  'nodejs'
+  'npm'
+)
+options=('!lto' '!debug')
+source=('sysmon-pro.desktop')
+sha256sums=('fa426754e8ad3e8a821b7cad44da0bd808f5081813af570811eaac2cb5eb4582')
+
+prepare() {
+  local _desktop_target _repo_root
+  _desktop_target="$(readlink -f "$srcdir/sysmon-pro.desktop")"
+  _repo_root="$(cd "$(dirname "$_desktop_target")/../.." && pwd)"
+
+  rm -rf "$srcdir/$pkgname-src"
+  mkdir -p "$srcdir/$pkgname-src"
+
+  if [ -f "$_repo_root/package.json" ] && [ -f "$_repo_root/src-tauri/tauri.conf.json" ]; then
+    tar \
+      --exclude='.git' \
+      --exclude='node_modules' \
+      --exclude='dist' \
+      --exclude='src-tauri/target' \
+      --exclude='packaging/arch/src' \
+      --exclude='packaging/arch/pkg' \
+      --exclude='*.pkg.tar.*' \
+      -cf - -C "$_repo_root" . | tar -xf - -C "$srcdir/$pkgname-src"
+  else
+    git clone --depth 1 --branch "v${pkgver}" "$url.git" "$srcdir/$pkgname-src" \
+      || git clone --depth 1 "$url.git" "$srcdir/$pkgname-src"
+  fi
+}
+
+pkgver() {
+  local _ver
+  _ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$srcdir/$pkgname-src/src-tauri/tauri.conf.json" | head -n 1 | tr '-' '_')"
+  printf '%s\n' "${_ver:-$pkgver}"
+}
+
+build() {
+  cd "$srcdir/$pkgname-src"
+
+  if [ -f package-lock.json ]; then
+    npm ci --include=optional
+  else
+    npm install --include=optional
+  fi
+
+  npm run build
+
+  export CARGO_TARGET_DIR="$srcdir/target"
+  cargo build --release --locked --manifest-path src-tauri/Cargo.toml
+}
+
+package() {
+  cd "$srcdir/$pkgname-src"
+
+  install -Dm755 "$srcdir/target/release/sysmon-desktop" "$pkgdir/usr/bin/$pkgname"
+  ln -s "$pkgname" "$pkgdir/usr/bin/sysmon-desktop"
+
+  install -Dm644 "$srcdir/sysmon-pro.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"
+
+  install -Dm644 "src-tauri/icons/32x32.png" "$pkgdir/usr/share/icons/hicolor/32x32/apps/$pkgname.png"
+  install -Dm644 "src-tauri/icons/64x64.png" "$pkgdir/usr/share/icons/hicolor/64x64/apps/$pkgname.png"
+  install -Dm644 "src-tauri/icons/128x128.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/$pkgname.png"
+  install -Dm644 "src-tauri/icons/128x128@2x.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/$pkgname.png"
+  install -Dm644 "src-tauri/icons/icon.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/$pkgname.png"
+
+  install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

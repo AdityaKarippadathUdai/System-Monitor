@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=SysMon Pro
+GenericName=System Monitor
+Comment=Cross-platform real-time hardware telemetry and process monitor
+Exec=sysmon-pro
+Icon=sysmon-pro
+Terminal=false
+Type=Application
+Categories=System;Monitor;Utility;
+Keywords=system;monitor;hardware;cpu;memory;gpu;disk;network;process;telemetry;
+StartupNotify=true
+StartupWMClass=sysmon-pro

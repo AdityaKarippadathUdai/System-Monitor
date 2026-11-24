@@ -1,0 +1,110 @@
+name: Build Arch Linux Package (.pkg.tar.zst)
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-arch:
+    name: Arch Linux x86_64 (.pkg.tar.zst)
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Install Arch Linux build & runtime dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git \
+            nodejs \
+            npm \
+            rust \
+            cairo \
+            gcc-libs \
+            gdk-pixbuf2 \
+            glib2 \
+            glibc \
+            gtk3 \
+            hicolor-icon-theme \
+            libayatana-appindicator \
+            webkit2gtk-4.1 \
+            desktop-file-utils \
+            namcap \
+            sudo
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: TypeScript typecheck & frontend build verification
+        run: |
+          npm ci --include=optional
+          npm run lint
+          npm run build
+
+      - name: Verify Rust Linux compilation
+        working-directory: src-tauri
+        run: cargo check --locked --all-targets
+
+      - name: Validate desktop entry and PKGBUILD
+        run: |
+          desktop-file-validate packaging/arch/sysmon-pro.desktop
+          namcap packaging/arch/PKGBUILD
+
+      - name: Build Arch Linux package with makepkg
+        run: |
+          if ! id -u builder >/dev/null 2>&1; then
+            useradd -m builder
+            echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          fi
+          chown -R builder:builder packaging/arch
+          su - builder -c "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --printsrcinfo | tee /tmp/srcinfo.out && grep -q '^pkgname = sysmon-pro$' /tmp/srcinfo.out && grep -q '^pkgver = ' /tmp/srcinfo.out"
+          su - builder -c "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg -s --noconfirm"
+
+      - name: Validate built .pkg.tar.zst package
+        run: |
+          PKG_FILE="$(ls -1 packaging/arch/sysmon-pro-*.pkg.tar.zst | head -n 1)"
+          if [ -z "$PKG_FILE" ] || [ ! -f "$PKG_FILE" ]; then
+            echo "Error: Expected sysmon-pro-*.pkg.tar.zst was not generated."
+            exit 1
+          fi
+          echo "Built package: $PKG_FILE"
+          pacman -Qip "$PKG_FILE"
+          pacman -Qlp "$PKG_FILE"
+          namcap "$PKG_FILE"
+          pacman -U --noconfirm "$PKG_FILE"
+          test -x /usr/bin/sysmon-pro
+          test -L /usr/bin/sysmon-desktop
+          test -f /usr/share/applications/sysmon-pro.desktop
+          test -f /usr/share/icons/hicolor/32x32/apps/sysmon-pro.png
+          test -f /usr/share/icons/hicolor/64x64/apps/sysmon-pro.png
+          test -f /usr/share/icons/hicolor/128x128/apps/sysmon-pro.png
+          test -f /usr/share/icons/hicolor/256x256/apps/sysmon-pro.png
+          test -f /usr/share/icons/hicolor/512x512/apps/sysmon-pro.png
+          test -f /usr/share/licenses/sysmon-pro/LICENSE
+          desktop-file-validate /usr/share/applications/sysmon-pro.desktop
+          ldd /usr/bin/sysmon-pro | tee /tmp/ldd.txt
+          if grep -q "not found" /tmp/ldd.txt; then
+            echo "Error: Missing shared libraries detected for /usr/bin/sysmon-pro"
+            exit 1
+          fi
+
+      - name: Upload Arch Linux package artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: SysMon-Pro-Arch-Linux
+          path: packaging/arch/sysmon-pro-*.pkg.tar.zst
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (on version tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            packaging/arch/sysmon-pro-*.pkg.tar.zst

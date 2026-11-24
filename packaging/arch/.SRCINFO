@@ -1,0 +1,27 @@
+pkgbase = sysmon-pro
+	pkgdesc = Cross-platform real-time hardware telemetry and process monitoring desktop application
+	pkgver = 1.3.0
+	pkgrel = 1
+	url = https://github.com/AdityaKarippadathUdai/System-Monitor
+	arch = x86_64
+	license = MIT
+	makedepends = cargo
+	makedepends = nodejs
+	makedepends = npm
+	depends = cairo
+	depends = gcc-libs
+	depends = gdk-pixbuf2
+	depends = glib2
+	depends = glibc
+	depends = gtk3
+	depends = hicolor-icon-theme
+	depends = libayatana-appindicator
+	depends = webkit2gtk-4.1
+	optdepends = nvidia-utils: NVIDIA GPU telemetry via NVML and nvidia-smi
+	optdepends = iputils: native ICMP latency probing in Network Monitor
+	options = !lto
+	options = !debug
+	source = sysmon-pro.desktop
+	sha256sums = fa426754e8ad3e8a821b7cad44da0bd808f5081813af570811eaac2cb5eb4582
+
+pkgname = sysmon-pro

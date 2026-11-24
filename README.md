@@ -30,11 +30,12 @@
   - [Unified Telemetry Data Contracts](#unified-telemetry-data-contracts)
 - [Prerequisites](#prerequisites)
 - [Running in Development & Web Production Mode](#running-in-development--web-production-mode)
-- [Building Native Installers (`.deb`, `.AppImage`, `.exe`, `.msi`)](#building-native-installers-deb-appimage-exe-msi)
+- [Building Native Installers (`.deb`, `.AppImage`, `.pkg.tar.zst`, `.exe`, `.msi`)](#building-native-installers-deb-appimage-pkgtarzst-exe-msi)
   - [Option 1: Linux `.deb` & `.AppImage` (Ubuntu / Debian)](#option-1-creating-a-linux-deb-and-appimage-package-ubuntu--debian)
-  - [Option 2: Windows `.exe` Cross-Compilation from Ubuntu Linux (`cargo-xwin`)](#option-2-creating-a-windows-exe-installer-from-ubuntu--debian-linux-cargo-xwin)
-  - [Option 3: Native Windows `.exe` & `.msi` on Windows 10 / 11](#option-3-creating-a-windows-exe-and-msi-natively-on-windows-10--11)
-  - [Option 4: Automated CI/CD Builds via GitHub Actions](#option-4-automated-ci-builds-via-github-actions)
+  - [Option 2: Arch Linux `.pkg.tar.zst` (`PKGBUILD` / `makepkg`)](#option-2-creating-an-arch-linux-pkgtarzst-package-pkgbuild--makepkg)
+  - [Option 3: Windows `.exe` Cross-Compilation from Ubuntu Linux (`cargo-xwin`)](#option-3-creating-a-windows-exe-installer-from-ubuntu--debian-linux-cargo-xwin)
+  - [Option 4: Native Windows `.exe` & `.msi` on Windows 10 / 11](#option-4-creating-a-windows-exe-and-msi-natively-on-windows-10--11)
+  - [Option 5: Automated CI/CD Builds via GitHub Actions](#option-5-automated-ci-builds-via-github-actions)
 - [NPM Scripts & Configuration Reference](#npm-scripts--configuration-reference)
 - [Directory Layout](#directory-layout)
 - [Troubleshooting](#troubleshooting)
@@ -169,9 +170,9 @@ sudo apt-get install -y \
 ```
 
 #### Linux — Arch Linux & Fedora
-- **Arch Linux**:
+- **Arch Linux** (see [Option 2](#option-2-creating-an-arch-linux-pkgtarzst-package-pkgbuild--makepkg) for full `.pkg.tar.zst` packaging):
   ```bash
-  sudo pacman -Syu --needed webkit2gtk-4.1 base-devel curl wget openssl libappindicator-gtk3 librsvg patchelf
+  sudo pacman -Syu --needed base-devel rust nodejs npm webkit2gtk-4.1 gtk3 gdk-pixbuf2 cairo glib2 hicolor-icon-theme libayatana-appindicator
   ```
 - **Fedora**:
   ```bash
@@ -221,7 +222,7 @@ sudo apt-get install -y \
 
 ---
 
-## Building Native Installers (`.deb`, `.AppImage`, `.exe`, `.msi`)
+## Building Native Installers (`.deb`, `.AppImage`, `.pkg.tar.zst`, `.exe`, `.msi`)
 
 ### Quick Reference
 
@@ -229,6 +230,7 @@ sudo apt-get install -y \
 |---|---|---|---|
 | **Linux `.deb`** | Ubuntu / Debian | `npm run tauri build -- --bundles deb` | `src-tauri/target/release/bundle/deb/SysMon Pro_1.3.0_amd64.deb` |
 | **Linux `.deb` + `.AppImage`** | Linux | `npm run tauri build -- --bundles deb,appimage` | `src-tauri/target/release/bundle/deb/*.deb` & `appimage/*.AppImage` |
+| **Arch Linux `.pkg.tar.zst`** | Arch Linux | `cd packaging/arch && makepkg -si` | `packaging/arch/sysmon-pro-1.3.0-1-x86_64.pkg.tar.zst` |
 | **Windows `.exe` (Cross-Compile)** | Ubuntu / Debian | `npm run build:windows` | `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/SysMon Pro_1.3.0_x64-setup.exe` |
 | **Windows `.exe` (Native)** | Windows 10 / 11 | `npm run tauri build -- --bundles nsis` | `src-tauri\target\release\bundle\nsis\SysMon Pro_1.3.0_x64-setup.exe` |
 | **Windows `.exe` + `.msi`** | Windows 10 / 11 | `npm run tauri build -- --bundles nsis,msi` | `nsis\*-setup.exe` & `msi\*_x64_en-US.msi` |
@@ -274,7 +276,42 @@ sudo apt-get install -y \
 
 ---
 
-### Option 2: Creating a Windows `.exe` Installer from Ubuntu / Debian Linux (`cargo-xwin`)
+### Option 2: Creating an Arch Linux `.pkg.tar.zst` Package (`PKGBUILD` / `makepkg`)
+
+Because Tauri v2's built-in Linux bundler targets `.deb`, `.rpm`, and `.AppImage`, SysMon Pro provides a production-ready Arch Linux package definition at `packaging/arch/PKGBUILD` following Arch packaging standards (`/usr/bin`, `/usr/share/applications`, `/usr/share/icons/hicolor`, `/usr/share/licenses`).
+
+1. **Install Arch Linux packaging & runtime prerequisites**:
+   ```bash
+   sudo pacman -Syu --needed base-devel namcap desktop-file-utils
+   ```
+2. **Validate the `PKGBUILD` and `.SRCINFO` metadata**:
+   ```bash
+   cd packaging/arch
+   desktop-file-validate sysmon-pro.desktop
+   namcap PKGBUILD
+   makepkg --printsrcinfo
+   ```
+3. **Build and install the native `.pkg.tar.zst` package** (`pkgver` automatically syncs with `src-tauri/tauri.conf.json`):
+   ```bash
+   makepkg -si
+   ```
+   Or build only without installing (`makepkg -s`), then inspect and install with `pacman`:
+   ```bash
+   pacman -Qip sysmon-pro-*.pkg.tar.zst
+   namcap sysmon-pro-*.pkg.tar.zst
+   sudo pacman -U sysmon-pro-1.3.0-1-x86_64.pkg.tar.zst
+   ```
+   Installed files:
+   - `/usr/bin/sysmon-pro` (and `/usr/bin/sysmon-desktop` compatibility symlink)
+   - `/usr/share/applications/sysmon-pro.desktop`
+   - `/usr/share/icons/hicolor/{32x32,64x64,128x128,256x256,512x512}/apps/sysmon-pro.png`
+   - `/usr/share/licenses/sysmon-pro/LICENSE`
+
+   Uninstall cleanly at any time via `sudo pacman -R sysmon-pro`.
+
+---
+
+### Option 3: Creating a Windows `.exe` Installer from Ubuntu / Debian Linux (`cargo-xwin`)
 
 You can cross-compile a genuine **Windows 10/11 x64 NSIS `.exe` setup installer** directly from Ubuntu/Debian Linux without a Windows VM.
 
@@ -330,7 +367,7 @@ You can cross-compile a genuine **Windows 10/11 x64 NSIS `.exe` setup installer*
 
 ---
 
-### Option 3: Creating a Windows `.exe` (and `.msi`) Natively on Windows 10 / 11
+### Option 4: Creating a Windows `.exe` (and `.msi`) Natively on Windows 10 / 11
 
 1. **Install prerequisites** (Node.js 22, Rust MSVC, C++ Build Tools + Windows SDK, NSIS).
 2. **Clean-install dependencies & verify Rollup native module**:
@@ -350,7 +387,7 @@ You can cross-compile a genuine **Windows 10/11 x64 NSIS `.exe` setup installer*
    # Build NSIS (.exe) only:
    npm run tauri build -- --bundles nsis
 
-   # Or build BOTH NSIS (.exe) and WiX (.msi):
+   # OR build BOTH NSIS (.exe) and WiX (.msi):
    npm run tauri build -- --bundles nsis,msi
    ```
 4. **Generated installers**:
@@ -362,16 +399,18 @@ You can cross-compile a genuine **Windows 10/11 x64 NSIS `.exe` setup installer*
 
 ---
 
-### Option 4: Automated CI Builds via GitHub Actions
+### Option 5: Automated CI Builds via GitHub Actions
 
-Two independent workflows build artifacts on pushes to `main`/`master`, pull requests, manual triggers (`workflow_dispatch`), and `v*` version tags:
+Three independent workflows build artifacts on pushes to `main`/`master`, pull requests, manual triggers (`workflow_dispatch`), and `v*` version tags:
 
 - **`.github/workflows/build.yml`** (`ubuntu-22.04`, Node 22):
   - Installs WebKitGTK & Tauri Linux dependencies, runs `npm ci --include=optional`, `npm run lint`, `npm run build`, `cargo check --all-targets`, and `npm run tauri build -- --bundles deb,appimage`.
-  - Uploads the **`SysMon-Pro-Linux-x64`** artifact containing `.deb` and `.AppImage`.
+  - Uploads the **`SysMon-Pro-Linux-x64`** artifact (`.deb` and `.AppImage`) and attaches them to GitHub Releases on `v*` tags.
+- **`.github/workflows/build-arch.yml`** (`archlinux:base-devel` container):
+  - Installs Arch Linux `nodejs`, `npm`, `rust`, `webkit2gtk-4.1`, `gtk3`, `libayatana-appindicator`, `namcap`, and `desktop-file-utils`, runs `makepkg -s`, validates with `namcap` and `pacman -U`, and uploads the **`SysMon-Pro-Arch-Linux`** artifact (`sysmon-pro-*.pkg.tar.zst`) plus attaches it to GitHub Releases on `v*` tags.
 - **`.github/workflows/build-windows.yml`** (`windows-latest`, Node 22, `x86_64-pc-windows-msvc`):
   - Ensures `makensis` is installed, performs a clean `npm ci --include=optional`, verifies `@rollup/rollup-win32-x64-msvc`, runs `npm run lint`, `npm run build`, `cargo check --all-targets`, and `npm run tauri build -- --bundles nsis,msi`.
-  - Verifies non-empty `.exe` and `.msi` outputs, uploads the **`SysMon-Pro-Windows-x64-Setup`** artifact, and automatically publishes a **GitHub Release** when pushing a `v*` tag (e.g., `git tag v1.3.0 && git push origin v1.3.0`).
+  - Verifies non-empty `.exe` and `.msi` outputs, uploads the **`SysMon-Pro-Windows-x64-Setup`** artifact, and attaches both installers to a **GitHub Release** whenever pushing a `v*` tag (e.g., `git tag v1.3.0 && git push origin v1.3.0`).
 
 ---
 
@@ -403,7 +442,12 @@ Two independent workflows build artifacts on pushes to `main`/`master`, pull req
 .
 ├── .github/workflows/
 │   ├── build.yml                       # Ubuntu CI workflow (.deb & .AppImage)
+│   ├── build-arch.yml                  # Arch Linux CI workflow (.pkg.tar.zst)
 │   └── build-windows.yml               # Windows CI workflow (NSIS .exe, .msi & GitHub Releases)
+├── packaging/arch/
+│   ├── PKGBUILD                        # Arch Linux package build script (makepkg)
+│   ├── .SRCINFO                        # Arch package metadata
+│   └── sysmon-pro.desktop              # Freedesktop desktop launcher entry
 ├── scripts/
 │   ├── generate_app_icon.py            # Generates desktop/mobile app icon assets
 │   └── setup-windows-cross-compile.sh  # Installs LLVM/Clang/LLD/NSIS/cargo-xwin on Ubuntu
