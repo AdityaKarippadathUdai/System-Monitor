@@ -67,7 +67,7 @@ jobs:
 
       - name: Verify Rust Windows compilation
         working-directory: src-tauri
-        run: cargo check --all-targets
+        run: cargo check --locked --all-targets
 
       - name: Build Tauri Windows x64 installers (NSIS .exe & MSI)
         run: npm run tauri build -- --bundles nsis,msi

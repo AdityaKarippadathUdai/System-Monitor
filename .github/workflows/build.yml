@@ -65,7 +65,7 @@ jobs:
 
       - name: Verify Rust Linux compilation
         working-directory: src-tauri
-        run: cargo check --all-targets
+        run: cargo check --locked --all-targets
 
       - name: Build Tauri Linux bundles (.deb, .AppImage)
         run: npm run tauri build -- --bundles deb,appimage
