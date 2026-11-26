@@ -34,18 +34,6 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Ensure NSIS is available
-        shell: pwsh
-        run: |
-          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
-            choco install nsis -y
-            if (Test-Path "C:\Program Files (x86)\NSIS") {
-              "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-              $env:PATH = "C:\Program Files (x86)\NSIS;$env:PATH"
-            }
-          }
-          makensis -VERSION
-
       - name: Clean npm installation
         shell: pwsh
         run: |
@@ -69,8 +57,15 @@ jobs:
         working-directory: src-tauri
         run: cargo check --locked --all-targets
 
-      - name: Build Tauri Windows x64 installers (NSIS .exe & MSI)
-        run: npm run tauri build -- --bundles nsis,msi
+      - name: Build Tauri Windows x64 MSI installer (.msi)
+        run: npm run tauri build -- --bundles msi
+
+      - name: Ensure NSIS is available
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-nsis.ps1
+
+      - name: Build Tauri Windows x64 NSIS installer (.exe)
+        run: npm run tauri build -- --bundles nsis
 
       - name: Verify generated Windows installers
         shell: pwsh

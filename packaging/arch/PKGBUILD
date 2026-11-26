@@ -22,9 +22,9 @@ optdepends=(
   'iputils: native ICMP latency probing in Network Monitor'
 )
 makedepends=(
-  'cargo'
   'nodejs'
   'npm'
+  'rust'
 )
 options=('!lto' '!debug')
 source=('sysmon-pro.desktop')
@@ -55,9 +55,15 @@ prepare() {
 }
 
 pkgver() {
-  local _ver
-  _ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-    "$srcdir/$pkgname-src/src-tauri/tauri.conf.json" | head -n 1 | tr '-' '_')"
+  local _ver="" _conf=""
+  if [ -f "$srcdir/$pkgname-src/src-tauri/tauri.conf.json" ]; then
+    _conf="$srcdir/$pkgname-src/src-tauri/tauri.conf.json"
+  elif [ -f "../../src-tauri/tauri.conf.json" ]; then
+    _conf="../../src-tauri/tauri.conf.json"
+  fi
+  if [ -n "$_conf" ]; then
+    _ver="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_conf" | head -n 1 | tr '-' '_')"
+  fi
   printf '%s\n' "${_ver:-$pkgver}"
 }
 

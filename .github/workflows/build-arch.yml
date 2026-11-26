@@ -63,7 +63,7 @@ jobs:
             echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           fi
           chown -R builder:builder packaging/arch
-          su - builder -c "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --printsrcinfo | tee /tmp/srcinfo.out && grep -q '^pkgname = sysmon-pro$' /tmp/srcinfo.out && grep -q '^pkgver = ' /tmp/srcinfo.out"
+          su - builder -c "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --printsrcinfo > /tmp/srcinfo.out && cat /tmp/srcinfo.out && grep -Eq '^[[:space:]]*pkgbase = sysmon-pro$' /tmp/srcinfo.out && grep -Eq '^[[:space:]]*pkgname = sysmon-pro$' /tmp/srcinfo.out && grep -Eq '^[[:space:]]*pkgver = [0-9]+\.[0-9]+\.[0-9]+' /tmp/srcinfo.out && diff -u <(grep -v '^[[:space:]]*$' .SRCINFO | sed 's/^[[:space:]]*//' | sort) <(grep -v '^[[:space:]]*$' /tmp/srcinfo.out | sed 's/^[[:space:]]*//' | sort) && makepkg --verifysource --noconfirm && makepkg --packagelist"
           su - builder -c "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg -s --noconfirm"
 
       - name: Validate built .pkg.tar.zst package
