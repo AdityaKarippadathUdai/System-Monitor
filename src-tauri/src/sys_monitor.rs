@@ -2,10 +2,15 @@ use crate::cpu::CpuMonitor;
 use crate::disk::DiskMonitor;
 use crate::gpu::GpuMonitor;
 use crate::memory::collect_memory_stats;
-use crate::models::{KillResult, ProcessInfo, SystemOverview};
-use crate::network::NetworkMonitor;
+use crate::models::{KillResult, NetworkInterface, ProcessInfo, SystemOverview};
+use crate::network::models::{
+    NetworkConnection, NetworkHistoryResponse, NetworkTrafficOverview, ProcessNetworkDetails,
+    ProcessNetworkUsage,
+};
+use crate::network::{AdvancedNetworkMonitor, NetworkMonitor, NetworkStreamPayload};
 use crate::platform::{build_system_info, collect_static_platform_info, PlatformStaticInfo};
 use crate::processes::ProcessMonitor;
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use sysinfo::{
@@ -20,6 +25,7 @@ pub struct MonitorEngine {
     gpu_monitor: Mutex<GpuMonitor>,
     disk_monitor: Mutex<DiskMonitor>,
     network_monitor: Mutex<NetworkMonitor>,
+    advanced_network: Mutex<AdvancedNetworkMonitor>,
     process_monitor: Mutex<ProcessMonitor>,
     static_platform: PlatformStaticInfo,
     boot_time_secs: u64,
@@ -48,6 +54,7 @@ impl MonitorEngine {
             gpu_monitor: Mutex::new(GpuMonitor::new()),
             disk_monitor: Mutex::new(DiskMonitor::new()),
             network_monitor: Mutex::new(NetworkMonitor::new()),
+            advanced_network: Mutex::new(AdvancedNetworkMonitor::new()),
             process_monitor: Mutex::new(ProcessMonitor::new()),
             static_platform,
             boot_time_secs,
@@ -62,7 +69,6 @@ impl MonitorEngine {
         let now_sec = now_ms / 1000;
         let uptime_seconds = now_sec.saturating_sub(self.boot_time_secs);
 
-        // Refresh CPU & Memory under sys lock, then compute CPU, Memory, SystemInfo
         let (cpu, memory, system_info) = {
             let mut sys = self.sys.lock().unwrap();
             sys.refresh_cpu_usage();
@@ -103,6 +109,11 @@ impl MonitorEngine {
             net_mon.collect(&networks)
         };
 
+        {
+            let mut adv = self.advanced_network.lock().unwrap();
+            adv.record_lightweight_tick(&network_stats, now_ms);
+        }
+
         let gpus = {
             let mut gpu_mon = self.gpu_monitor.lock().unwrap();
             gpu_mon.collect()
@@ -132,10 +143,33 @@ impl MonitorEngine {
     }
 
     pub fn get_processes(&self) -> Vec<ProcessInfo> {
-        let mut sys = self.sys.lock().unwrap();
-        sys.refresh_processes();
-        let mut proc_mon = self.process_monitor.lock().unwrap();
-        proc_mon.collect(&sys)
+        let mut procs = {
+            let mut sys = self.sys.lock().unwrap();
+            sys.refresh_processes();
+            let mut proc_mon = self.process_monitor.lock().unwrap();
+            proc_mon.collect(&sys)
+        };
+
+        // Enrich processes with any measured per-process network speeds from the latest network sample
+        let net_map: HashMap<u32, (Option<u64>, Option<u64>)> = {
+            let adv = self.advanced_network.lock().unwrap();
+            adv.get_cached_processes()
+                .into_iter()
+                .filter(|p| p.is_measured)
+                .map(|p| (p.pid, (p.download_speed_bytes_sec, p.upload_speed_bytes_sec)))
+                .collect()
+        };
+
+        if !net_map.is_empty() {
+            for proc_item in &mut procs {
+                if let Some(&(rx, tx)) = net_map.get(&proc_item.pid) {
+                    proc_item.net_rx_bytes_sec = rx;
+                    proc_item.net_tx_bytes_sec = tx;
+                }
+            }
+        }
+
+        procs
     }
 
     pub fn kill_process(&self, pid: u32) -> KillResult {
@@ -143,5 +177,88 @@ impl MonitorEngine {
         sys.refresh_processes();
         let proc_mon = self.process_monitor.lock().unwrap();
         proc_mon.kill_process(&sys, pid)
+    }
+
+    pub fn collect_network_stream(&self) -> NetworkStreamPayload {
+        let network_stats = {
+            let mut networks = self.networks.lock().unwrap();
+            networks.refresh_list();
+            networks.refresh();
+            let mut net_mon = self.network_monitor.lock().unwrap();
+            net_mon.collect(&networks)
+        };
+
+        let mut sys = self.sys.lock().unwrap();
+        sys.refresh_processes();
+
+        let mut adv = self.advanced_network.lock().unwrap();
+        adv.collect_full(&network_stats, &sys)
+    }
+
+    pub fn get_network_interfaces(&self) -> Vec<NetworkInterface> {
+        let network_stats = {
+            let mut networks = self.networks.lock().unwrap();
+            networks.refresh_list();
+            networks.refresh();
+            let mut net_mon = self.network_monitor.lock().unwrap();
+            net_mon.collect(&networks)
+        };
+        network_stats.interfaces
+    }
+
+    pub fn get_network_overview(&self) -> NetworkTrafficOverview {
+        self.collect_network_stream().overview
+    }
+
+    pub fn get_network_processes(&self) -> Vec<ProcessNetworkUsage> {
+        self.collect_network_stream().processes
+    }
+
+    pub fn get_network_connections(&self) -> Vec<NetworkConnection> {
+        self.collect_network_stream().connections
+    }
+
+    pub fn get_process_network_details(&self, pid: u32) -> Option<ProcessNetworkDetails> {
+        let _ = self.collect_network_stream();
+        let sys = self.sys.lock().unwrap();
+        let adv = self.advanced_network.lock().unwrap();
+        adv.get_process_details(pid, &sys)
+    }
+
+    pub fn set_network_interface(&self, interface_name: String) -> String {
+        let mut adv = self.advanced_network.lock().unwrap();
+        adv.set_interface(interface_name)
+    }
+
+    pub fn get_network_history(
+        &self,
+        period: String,
+        interface_name: Option<String>,
+    ) -> NetworkHistoryResponse {
+        let adv = self.advanced_network.lock().unwrap();
+        adv.get_history(&period, interface_name.as_deref())
+    }
+
+    pub fn flush_network_history(&self) {
+        let mut adv = self.advanced_network.lock().unwrap();
+        adv.flush_history();
+    }
+
+    pub fn evaluate_gaming(
+        &self,
+        gaming: &crate::gaming::GamingManager,
+        cfg: &crate::desktop::models::GamingConfig,
+        manual_only_startup: bool,
+        refresh_procs: bool,
+    ) -> (
+        crate::desktop::models::GamingStatus,
+        crate::desktop::models::FpsTelemetry,
+        Option<f32>,
+    ) {
+        let mut sys = self.sys.lock().unwrap();
+        if refresh_procs {
+            sys.refresh_processes();
+        }
+        gaming.evaluate(&sys, cfg, manual_only_startup)
     }
 }

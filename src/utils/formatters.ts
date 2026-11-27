@@ -29,6 +29,30 @@ export function formatSpeed(bytesPerSec: number | null | undefined, decimals: nu
 }
 
 /**
+ * Format transfer rates in bits per second (bps, Kbps, Mbps, Gbps)
+ */
+export function formatBitsSpeed(bytesPerSec: number | null | undefined, decimals: number = 1): string {
+  if (bytesPerSec === null || bytesPerSec === undefined || !Number.isFinite(bytesPerSec)) return 'N/A';
+  const bits = bytesPerSec * 8;
+  if (bits <= 0) return '0 bps';
+  const k = 1000;
+  const sizes = ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps'];
+  const i = Math.min(Math.floor(Math.log(bits) / Math.log(k)), sizes.length - 1);
+  if (i <= 0) return `${Math.round(bits)} bps`;
+  return `${parseFloat((bits / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`;
+}
+
+export function formatBandwidthRate(
+  bytesPerSec: number | null | undefined,
+  unit: 'bytes' | 'bits' = 'bytes',
+  decimals: number = 1
+): string {
+  return unit === 'bits'
+    ? formatBitsSpeed(bytesPerSec, decimals)
+    : formatSpeed(bytesPerSec, decimals);
+}
+
+/**
  * Format uptime seconds into d, h, m, s
  */
 export function formatUptime(seconds: number): string {

@@ -8,6 +8,8 @@ import {
   CheckCircle2,
   Zap,
   Play,
+  AppWindow,
+  ArrowRight,
 } from 'lucide-react';
 import { useSystemStore } from '../store/systemStore';
 import { SystemDetails } from '../components/SystemDetails';
@@ -16,6 +18,7 @@ export const SettingsPage: React.FC = () => {
   const settings = useSystemStore((state) => state.settings);
   const updateSettings = useSystemStore((state) => state.updateSettings);
   const setTurboMode = useSystemStore((state) => state.setTurboMode);
+  const setPage = useSystemStore((state) => state.setPage);
   const overview = useSystemStore((state) => state.overview);
   const processes = useSystemStore((state) => state.processes);
   const tauriStats = useSystemStore((state) => state.tauriStats);
@@ -92,6 +95,30 @@ export const SettingsPage: React.FC = () => {
             <span>{notification}</span>
           </div>
         )}
+      </div>
+
+      {/* Desktop Experience Quick Link */}
+      <div className="bg-[#0B1118] border border-[#1A2633] rounded-lg p-3.5 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded bg-blue-500/15 text-blue-400 border border-blue-500/30">
+            <AppWindow className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-slate-100">
+              Desktop Experience Settings
+            </div>
+            <div className="text-[11px] text-slate-400">
+              Floating widgets, desktop overlays, tray behavior, background polling, layouts, themes, shortcuts, startup & Gaming Mode
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={() => setPage('desktop')}
+          className="px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+        >
+          <span>Open Desktop Experience</span>
+          <ArrowRight className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Tauri Native Speed & IPC Diagnostics Panel */}

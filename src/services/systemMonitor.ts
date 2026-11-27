@@ -9,6 +9,14 @@ import {
   GpuStats,
   DiskStats,
   NetworkStats,
+  NetworkInterface,
+  NetworkTrafficOverview,
+  NetworkConnection,
+  ProcessNetworkUsage,
+  NetworkHistoryResponse,
+  ProcessNetworkDetails,
+  NetworkStreamPayload,
+  NetworkTimePeriod,
   SystemInfo,
   SystemOverview,
   PingResult,
@@ -45,6 +53,17 @@ export interface ISystemMonitorService {
     maxLatencyMs: number;
     opsPerSec: number;
   }>;
+
+  // Enhanced Network Monitoring APIs
+  setNetworkMonitoringActive(active: boolean, intervalMs?: number): Promise<void>;
+  subscribeToNetworkStream(handler: (payload: NetworkStreamPayload) => void): Promise<UnlistenFn>;
+  getNetworkInterfaces(): Promise<NetworkInterface[]>;
+  getNetworkOverview(): Promise<NetworkTrafficOverview>;
+  getNetworkProcesses(): Promise<ProcessNetworkUsage[]>;
+  getNetworkConnections(): Promise<NetworkConnection[]>;
+  getProcessNetworkDetails(pid: number): Promise<ProcessNetworkDetails | null>;
+  setNetworkInterface(interfaceName: string): Promise<string>;
+  getNetworkHistory(period: NetworkTimePeriod, interfaceName?: string): Promise<NetworkHistoryResponse>;
 }
 
 class RealSystemMonitorService implements ISystemMonitorService {
@@ -72,6 +91,128 @@ class RealSystemMonitorService implements ISystemMonitorService {
 
   async subscribeToOverviewStream(handler: (overview: SystemOverview) => void): Promise<UnlistenFn> {
     return await listenToTauriStream<SystemOverview>('system_metrics_stream', handler);
+  }
+
+  async setNetworkMonitoringActive(active: boolean, intervalMs?: number): Promise<void> {
+    if (this.isTauriAvailable()) {
+      try {
+        await invokeTauriCommand<boolean>('set_network_monitoring_active', {
+          active,
+          intervalMs: intervalMs ?? null,
+        });
+      } catch (err) {
+        console.warn('[SystemMonitor] Failed to toggle network monitoring state:', err);
+      }
+    }
+  }
+
+  async subscribeToNetworkStream(handler: (payload: NetworkStreamPayload) => void): Promise<UnlistenFn> {
+    return await listenToTauriStream<NetworkStreamPayload>('network_metrics_stream', handler);
+  }
+
+  async getNetworkInterfaces(): Promise<NetworkInterface[]> {
+    if (this.isTauriAvailable()) {
+      try {
+        return await invokeTauriCommand<NetworkInterface[]>('get_network_interfaces');
+      } catch (err) {
+        console.warn('[SystemMonitor] Tauri get_network_interfaces fallback:', err);
+      }
+    }
+    const res = await fetch('/api/network/interfaces');
+    if (!res.ok) throw new Error(`Failed to fetch network interfaces: ${res.statusText}`);
+    return await res.json();
+  }
+
+  async getNetworkOverview(): Promise<NetworkTrafficOverview> {
+    if (this.isTauriAvailable()) {
+      try {
+        return await invokeTauriCommand<NetworkTrafficOverview>('get_network_overview');
+      } catch (err) {
+        console.warn('[SystemMonitor] Tauri get_network_overview fallback:', err);
+      }
+    }
+    const res = await fetch('/api/network/overview');
+    if (!res.ok) throw new Error(`Failed to fetch network overview: ${res.statusText}`);
+    return await res.json();
+  }
+
+  async getNetworkProcesses(): Promise<ProcessNetworkUsage[]> {
+    if (this.isTauriAvailable()) {
+      try {
+        return await invokeTauriCommand<ProcessNetworkUsage[]>('get_network_processes');
+      } catch (err) {
+        console.warn('[SystemMonitor] Tauri get_network_processes fallback:', err);
+      }
+    }
+    const res = await fetch('/api/network/processes');
+    if (!res.ok) throw new Error(`Failed to fetch network processes: ${res.statusText}`);
+    return await res.json();
+  }
+
+  async getNetworkConnections(): Promise<NetworkConnection[]> {
+    if (this.isTauriAvailable()) {
+      try {
+        return await invokeTauriCommand<NetworkConnection[]>('get_network_connections');
+      } catch (err) {
+        console.warn('[SystemMonitor] Tauri get_network_connections fallback:', err);
+      }
+    }
+    const res = await fetch('/api/network/connections');
+    if (!res.ok) throw new Error(`Failed to fetch network connections: ${res.statusText}`);
+    return await res.json();
+  }
+
+  async getProcessNetworkDetails(pid: number): Promise<ProcessNetworkDetails | null> {
+    if (this.isTauriAvailable()) {
+      try {
+        return await invokeTauriCommand<ProcessNetworkDetails | null>('get_process_network_details', {
+          pid,
+        });
+      } catch (err) {
+        console.warn('[SystemMonitor] Tauri get_process_network_details fallback:', err);
+      }
+    }
+    const res = await fetch(`/api/network/process/${pid}`);
+    if (!res.ok) return null;
+    return await res.json();
+  }
+
+  async setNetworkInterface(interfaceName: string): Promise<string> {
+    if (this.isTauriAvailable()) {
+      try {
+        return await invokeTauriCommand<string>('set_network_interface', { interfaceName });
+      } catch (err) {
+        console.warn('[SystemMonitor] Tauri set_network_interface fallback:', err);
+      }
+    }
+    const res = await fetch('/api/network/interface', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interfaceName }),
+    });
+    const data = await res.json();
+    return data.selectedInterface || interfaceName;
+  }
+
+  async getNetworkHistory(
+    period: NetworkTimePeriod,
+    interfaceName?: string
+  ): Promise<NetworkHistoryResponse> {
+    if (this.isTauriAvailable()) {
+      try {
+        return await invokeTauriCommand<NetworkHistoryResponse>('get_network_history', {
+          period,
+          interfaceName: interfaceName ?? null,
+        });
+      } catch (err) {
+        console.warn('[SystemMonitor] Tauri get_network_history fallback:', err);
+      }
+    }
+    const params = new URLSearchParams({ period });
+    if (interfaceName) params.set('iface', interfaceName);
+    const res = await fetch(`/api/network/history?${params.toString()}`);
+    if (!res.ok) throw new Error(`Failed to fetch network history: ${res.statusText}`);
+    return await res.json();
   }
 
   async pingTarget(target: string, port?: number): Promise<PingResult> {
@@ -189,5 +330,4 @@ class RealSystemMonitorService implements ISystemMonitorService {
   }
 }
 
-// Singleton Service Instance
 export const systemMonitorService: ISystemMonitorService = new RealSystemMonitorService();

@@ -1,10 +1,12 @@
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import net from 'net';
 import { execFile } from 'child_process';
 import si from 'systeminformation';
 import { createServer as createViteServer } from 'vite';
+import { hostNetworkMonitor } from './server-network';
 
 const app = express();
 const PORT = 3000;
@@ -90,48 +92,6 @@ function formatCacheSize(bytes?: number | null): string | null {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
-function classifyNetworkInterface(iface: si.Systeminformation.NetworkInterfacesData): 'wifi' | 'ethernet' | 'vpn' | 'virtual' | 'loopback' {
-  const name = (iface.iface || '').toLowerCase();
-  const display = (iface.ifaceName || '').toLowerCase();
-  const type = (iface.type || '').toLowerCase();
-  const combined = `${name} ${display} ${type}`;
-
-  if (iface.internal || type.includes('loopback') || name === 'lo' || combined.includes('loopback')) {
-    return 'loopback';
-  }
-  if (type.includes('wireless') || name.startsWith('wl') || combined.includes('wi-fi') || combined.includes('wifi') || combined.includes('wlan')) {
-    return 'wifi';
-  }
-  if (
-    type.includes('tunnel') ||
-    name.startsWith('wg') ||
-    name.startsWith('tun') ||
-    name.startsWith('tap') ||
-    name.startsWith('ppp') ||
-    combined.includes('vpn') ||
-    combined.includes('wireguard') ||
-    combined.includes('tailscale') ||
-    combined.includes('zerotier')
-  ) {
-    return 'vpn';
-  }
-  if (
-    iface.virtual ||
-    name.startsWith('docker') ||
-    name.startsWith('br-') ||
-    name.startsWith('veth') ||
-    name.startsWith('virbr') ||
-    name.startsWith('vmnet') ||
-    name.startsWith('vboxnet') ||
-    combined.includes('vethernet') ||
-    combined.includes('hyper-v') ||
-    combined.includes('wsl')
-  ) {
-    return 'virtual';
-  }
-  return 'ethernet';
-}
-
 function classifyGpuVendor(rawVendor?: string | null, name?: string | null): string {
   const combined = `${rawVendor || ''} ${name || ''}`.toLowerCase();
   if (combined.includes('nvidia') || combined.includes('geforce') || combined.includes('quadro') || combined.includes('rtx')) {
@@ -158,8 +118,7 @@ app.get('/api/system/overview', async (_req, res) => {
       graphics,
       fsList,
       disksIO,
-      netStats,
-      netInterfaces,
+      netSummary,
       procSummary,
       timeInfo,
     ] = await Promise.all([
@@ -171,8 +130,7 @@ app.get('/api/system/overview', async (_req, res) => {
       si.graphics().catch(() => null),
       si.fsSize().catch(() => []),
       si.disksIO().catch(() => null),
-      si.networkStats().catch(() => []),
-      si.networkInterfaces().catch(() => []),
+      hostNetworkMonitor.collectInterfaces(),
       si.processes().catch(() => null),
       si.time(),
     ]);
@@ -377,58 +335,14 @@ app.get('/api/system/overview', async (_req, res) => {
         };
       });
 
-    // Network Metrics
-    const netStatsArray = Array.isArray(netStats) ? netStats : [netStats].filter(Boolean);
-    const netIfacesArray = Array.isArray(netInterfaces) ? netInterfaces : [netInterfaces].filter(Boolean);
-
-    let totalDownloadSpeed = 0;
-    let totalUploadSpeed = 0;
-    let totalDownloaded = 0;
-    let totalUploaded = 0;
-
-    const mappedInterfaces = netIfacesArray.map((iface) => {
-      const stats = netStatsArray.find((s) => s.iface === iface.iface) || ({} as any);
-      const rxSec = Math.max(0, Math.round(stats.rx_sec || 0));
-      const txSec = Math.max(0, Math.round(stats.tx_sec || 0));
-      const rxBytes = stats.rx_bytes || 0;
-      const txBytes = stats.tx_bytes || 0;
-      const type = classifyNetworkInterface(iface);
-
-      if (type !== 'loopback') {
-        totalDownloadSpeed += rxSec;
-        totalUploadSpeed += txSec;
-        totalDownloaded += rxBytes;
-        totalUploaded += txBytes;
-      }
-
-      return {
-        name: iface.iface,
-        displayName: iface.ifaceName || iface.iface,
-        type,
-        ip4: iface.ip4 || null,
-        ip6: iface.ip6 || null,
-        mac: iface.mac && iface.mac !== '00:00:00:00:00:00' ? iface.mac.toUpperCase() : null,
-        isUp: iface.operstate === 'up' || Boolean(iface.ip4),
-        rxBytesTotal: rxBytes,
-        txBytesTotal: txBytes,
-        rxSpeedBytesSec: rxSec,
-        txSpeedBytesSec: txSec,
-        packetLossPercent: null,
-      };
-    });
-
-    const activeIf =
-      mappedInterfaces.find((i) => i.isUp && i.type !== 'loopback' && i.ip4) ||
-      mappedInterfaces.find((i) => i.isUp && i.type !== 'loopback') ||
-      mappedInterfaces[0];
-
+    // Network Metrics (real /proc/net/dev + interface metadata, zero unspec drop-offs)
     const network = {
-      downloadSpeedBytesSec: totalDownloadSpeed,
-      uploadSpeedBytesSec: totalUploadSpeed,
-      totalDownloadedBytes: totalDownloaded,
-      totalUploadedBytes: totalUploaded,
-      activeInterface: activeIf ? activeIf.name : 'N/A',
-      interfaces: mappedInterfaces,
+      downloadSpeedBytesSec: netSummary.totalDownloadSpeed,
+      uploadSpeedBytesSec: netSummary.totalUploadSpeed,
+      totalDownloadedBytes: netSummary.totalDownloaded,
+      totalUploadedBytes: netSummary.totalUploaded,
+      activeInterface: netSummary.activeInterface,
+      interfaces: netSummary.interfaces,
     };
 
     const platform = hostPlatform === 'win32' ? 'windows' : hostPlatform === 'darwin' ? 'macos' : 'linux';
@@ -724,6 +638,389 @@ app.get('/api/system/network-ping', async (req, res) => {
       });
       resolve();
     });
+  });
+});
+
+// Network Monitor API endpoints
+app.get('/api/network/interfaces', async (_req, res) => {
+  try {
+    const data = await hostNetworkMonitor.collectInterfaces();
+    res.json(data.interfaces);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to collect network interfaces' });
+  }
+});
+
+app.get('/api/network/overview', async (_req, res) => {
+  try {
+    const overview = await hostNetworkMonitor.getNetworkOverview();
+    res.json(overview);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to gather network overview' });
+  }
+});
+
+app.get('/api/network/processes', async (_req, res) => {
+  try {
+    const data = await hostNetworkMonitor.collectSocketsAndProcesses();
+    res.json(data.processes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to collect per-process network usage' });
+  }
+});
+
+app.get('/api/network/connections', async (_req, res) => {
+  try {
+    const data = await hostNetworkMonitor.collectSocketsAndProcesses();
+    res.json(data.connections);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to collect active connections' });
+  }
+});
+
+app.get('/api/network/process/:pid', async (req, res) => {
+  const pid = Number(req.params.pid);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return res.status(400).json({ error: 'Invalid PID' });
+  }
+  try {
+    const details = await hostNetworkMonitor.getProcessDetails(pid);
+    res.json(details);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to inspect process network details' });
+  }
+});
+
+app.post('/api/network/interface', (req, res) => {
+  const interfaceName = String(req.body?.interfaceName || 'all');
+  const active = hostNetworkMonitor.setSelectedInterface(interfaceName);
+  res.json({ selectedInterface: active });
+});
+
+app.get('/api/network/history', (req, res) => {
+  const period = String(req.query.period || '5m');
+  const iface = req.query.iface ? String(req.query.iface) : undefined;
+  res.json(hostNetworkMonitor.getHistory(period, iface));
+});
+
+// Desktop Experience Host API endpoints (Web / Preview mode)
+const DESKTOP_CONFIG_FILE = path.join(os.tmpdir(), 'sysmon-pro-desktop-config.json');
+
+const DEFAULT_DESKTOP_CONFIG = {
+  widget: {
+    enabled: false,
+    visible: false,
+    x: 36,
+    y: 48,
+    width: 310,
+    height: 360,
+    opacity: 0.86,
+    alwaysOnTop: true,
+    clickThrough: false,
+    showBorder: true,
+    backgroundBlur: true,
+    layoutMode: 'detailed',
+    sizePreset: 'medium',
+    showPinnedSection: true,
+    metrics: [
+      'cpu_usage',
+      'cpu_temp',
+      'gpu_usage',
+      'gpu_temp',
+      'ram_usage',
+      'vram_usage',
+      'net_down',
+      'net_up',
+      'battery',
+      'fps',
+    ],
+  },
+  overlay: {
+    enabled: false,
+    visible: false,
+    x: 24,
+    y: 24,
+    width: 420,
+    height: 76,
+    opacity: 0.8,
+    alwaysOnTop: true,
+    clickThrough: true,
+    showBorder: true,
+    backgroundBlur: true,
+    positionPreset: 'top-right',
+    metrics: ['cpu_usage', 'cpu_temp', 'gpu_usage', 'gpu_temp', 'ram_usage', 'net_down', 'net_up'],
+  },
+  tray: {
+    enabled: true,
+    minimizeToTrayOnClose: true,
+    showTooltipMetrics: true,
+    startMinimized: false,
+  },
+  background: {
+    enabled: true,
+    intervalMs: 1000,
+    pauseWhenAllHidden: false,
+  },
+  startup: {
+    launchAtLogin: false,
+    startMinimized: false,
+    startFloatingWidget: false,
+    startBackgroundMonitoring: true,
+    manualGamingModeOnly: false,
+  },
+  appearance: {
+    theme: 'dark',
+    accentColor: '#3B82F6',
+    widgetOpacity: 0.86,
+    widgetBorder: true,
+    cornerRadius: 10,
+    fontSize: 'md',
+    density: 'comfortable',
+    backgroundBlur: true,
+    metricColors: {
+      cpu: '#3B82F6',
+      gpu: '#06B6D4',
+      memory: '#10B981',
+      network: '#EC4899',
+      battery: '#F59E0B',
+      fps: '#22C55E',
+    },
+  },
+  shortcuts: {
+    toggleDashboard: 'Ctrl+Shift+M',
+    toggleWidget: 'Ctrl+Shift+W',
+    toggleGamingMode: 'Ctrl+Shift+G',
+    toggleOverlay: 'Ctrl+Shift+O',
+    toggleClickThrough: 'Ctrl+Shift+L',
+  },
+  gaming: {
+    enabled: false,
+    autoDetect: true,
+    positionPreset: 'top-left',
+    x: 20,
+    y: 20,
+    width: 280,
+    height: 220,
+    opacity: 0.78,
+    compactMode: false,
+    refreshIntervalMs: 1000,
+    alwaysOnTop: true,
+    clickThrough: true,
+    metrics: [
+      'fps',
+      'cpu_usage',
+      'cpu_temp',
+      'gpu_usage',
+      'gpu_temp',
+      'ram_usage',
+      'vram_usage',
+      'gpu_power',
+      'net_latency',
+    ],
+    latencyTarget: '1.1.1.1',
+    exclusions: [],
+    customGames: [],
+    perGameOverrides: {},
+  },
+  pinnedMetrics: [
+    {
+      id: 'pin-cpu-temp',
+      metric: 'cpu_temp',
+      label: 'CPU Temp',
+      displayFormat: 'absolute',
+      warningThreshold: 75,
+      criticalThreshold: 90,
+      compact: true,
+    },
+    {
+      id: 'pin-gpu-temp',
+      metric: 'gpu_temp',
+      label: 'GPU Temp',
+      displayFormat: 'absolute',
+      warningThreshold: 78,
+      criticalThreshold: 88,
+      compact: true,
+    },
+    {
+      id: 'pin-ram',
+      metric: 'ram_usage',
+      label: 'RAM',
+      displayFormat: 'combined',
+      warningThreshold: 80,
+      criticalThreshold: 92,
+      compact: true,
+    },
+    {
+      id: 'pin-net-dl',
+      metric: 'net_down',
+      label: 'Net Down',
+      displayFormat: 'absolute',
+      warningThreshold: null,
+      criticalThreshold: null,
+      compact: true,
+    },
+  ],
+};
+
+function readHostDesktopConfig() {
+  try {
+    if (fs.existsSync(DESKTOP_CONFIG_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(DESKTOP_CONFIG_FILE, 'utf-8'));
+      return { ...DEFAULT_DESKTOP_CONFIG, ...parsed };
+    }
+  } catch {
+    // fallback
+  }
+  return structuredClone(DEFAULT_DESKTOP_CONFIG);
+}
+
+function writeHostDesktopConfig(cfg: any) {
+  try {
+    fs.writeFileSync(DESKTOP_CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf-8');
+  } catch {
+    // ignore
+  }
+}
+
+function getHostDesktopCapabilities() {
+  const isWin = os.platform() === 'win32';
+  const isWayland = !isWin && Boolean(process.env.WAYLAND_DISPLAY || process.env.XDG_SESSION_TYPE === 'wayland');
+  const isX11 = !isWin && !isWayland && Boolean(process.env.DISPLAY);
+  return {
+    platform: isWin ? 'windows' : os.platform() === 'darwin' ? 'macos' : 'linux',
+    displayServer: isWin ? 'Desktop Window Manager (DWM)' : isWayland ? 'Wayland' : isX11 ? 'X11' : 'Browser Preview',
+    desktopEnvironment: isWin
+      ? 'Windows Shell'
+      : process.env.XDG_CURRENT_DESKTOP || process.env.DESKTOP_SESSION || 'Web Runtime',
+    transparencySupported: true,
+    blurSupported: isWin,
+    clickThroughSupported: false,
+    alwaysOnTopSupported: false,
+    positioningSupported: false,
+    globalShortcutsSupported: false,
+    traySupported: false,
+    limitations: [
+      'Running in Browser / Express preview mode. Native desktop floating windows, system tray, always-on-top, and global OS hotkeys run inside the Tauri v2 desktop binary.',
+    ],
+  };
+}
+
+app.get('/api/desktop/config', (_req, res) => {
+  res.json(readHostDesktopConfig());
+});
+
+app.post('/api/desktop/config', (req, res) => {
+  const current = readHostDesktopConfig();
+  const next = { ...current, ...(req.body || {}) };
+  writeHostDesktopConfig(next);
+  res.json(next);
+});
+
+app.get('/api/desktop/battery', async (_req, res) => {
+  try {
+    const bat = await si.battery();
+    if (!bat || !bat.hasBattery) {
+      return res.json(null);
+    }
+    res.json({
+      percent: Number((bat.percent ?? 0).toFixed(1)),
+      isCharging: Boolean(bat.isCharging),
+      acOnline: Boolean(bat.acConnected || bat.isCharging),
+      state: bat.isCharging ? 'Charging' : bat.acConnected ? 'AC Power' : 'Discharging',
+      timeRemainingSecs: bat.timeRemaining && bat.timeRemaining > 0 ? Math.round(bat.timeRemaining * 60) : null,
+      powerWatts: null,
+    });
+  } catch {
+    res.json(null);
+  }
+});
+
+app.get('/api/desktop/telemetry', async (_req, res) => {
+  try {
+    const cfg = readHostDesktopConfig();
+    const [bat, procData] = await Promise.all([
+      si.battery().catch(() => null),
+      si.processes().catch(() => null),
+    ]);
+
+    const battery =
+      bat && bat.hasBattery
+        ? {
+            percent: Number((bat.percent ?? 0).toFixed(1)),
+            isCharging: Boolean(bat.isCharging),
+            acOnline: Boolean(bat.acConnected || bat.isCharging),
+            state: bat.isCharging ? 'Charging' : bat.acConnected ? 'AC Power' : 'Discharging',
+            timeRemainingSecs:
+              bat.timeRemaining && bat.timeRemaining > 0 ? Math.round(bat.timeRemaining * 60) : null,
+            powerWatts: null,
+          }
+        : null;
+
+    const exclusions = new Set((cfg.gaming?.exclusions || []).map((x: string) => x.toLowerCase()));
+    const customGames = (cfg.gaming?.customGames || []).map((x: string) => x.toLowerCase());
+    const detectedGames: any[] = [];
+
+    for (const p of procData?.list || []) {
+      const name = String(p.name || '');
+      const cmd = String(p.command || p.path || '');
+      const lower = `${name} ${cmd}`.toLowerCase();
+      const matchedCustom = customGames.some((g: string) => g && lower.includes(g));
+      const matchedStore =
+        lower.includes('steamapps/common') ||
+        lower.includes('proton') ||
+        lower.includes('lutris') ||
+        lower.includes('epic games') ||
+        lower.includes('gog games');
+
+      if (matchedCustom || matchedStore) {
+        const isExcluded = exclusions.has(name.toLowerCase());
+        detectedGames.push({
+          pid: p.pid,
+          name,
+          executablePath: p.path || name,
+          detectionSource: matchedCustom ? 'Custom Game List' : 'Game Launcher / Storefront',
+          isExcluded,
+          mangohudActive: false,
+        });
+      }
+    }
+
+    const activeGame = detectedGames.find((g) => !g.isExcluded) || null;
+    const isWin = os.platform() === 'win32';
+
+    res.json({
+      battery,
+      fps: {
+        fps: null,
+        frameTimeMs: null,
+        source: 'Unavailable',
+        activeGamePid: activeGame?.pid ?? null,
+        activeGameName: activeGame?.name ?? null,
+        available: false,
+        requiredIntegration: isWin
+          ? 'Requires RivaTuner Statistics Server (RTSS) in the native Tauri desktop app for live FPS.'
+          : 'Requires MangoHud with logging enabled in the native Tauri desktop app for live FPS.',
+      },
+      gaming: {
+        active: Boolean(cfg.gaming?.enabled || (cfg.gaming?.autoDetect && activeGame)),
+        autoActivated: Boolean(!cfg.gaming?.enabled && cfg.gaming?.autoDetect && activeGame),
+        detectedGames: detectedGames.slice(0, 12),
+        activeGame,
+      },
+      config: cfg,
+      capabilities: getHostDesktopCapabilities(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to gather desktop telemetry' });
+  }
+});
+
+app.get('/api/desktop/startup', (_req, res) => {
+  res.json({
+    enabled: false,
+    mechanism: 'Native Tauri Desktop Only',
+    entryPath: '',
+    note: 'System login autostart is configured via the native Tauri desktop application.',
   });
 });
 

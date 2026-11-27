@@ -9,7 +9,7 @@ import {
   Network,
   Settings,
   Activity,
-  Zap,
+  AppWindow,
 } from 'lucide-react';
 import { AppPage, useSystemStore } from '../store/systemStore';
 import { StatusIndicator } from './StatusIndicator';
@@ -32,6 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ className = '' }) => {
     { id: 'gpu', label: 'GPU', icon: MonitorCog },
     { id: 'disk', label: 'Disk', icon: HardDrive },
     { id: 'network', label: 'Network', icon: Network },
+    { id: 'desktop', label: 'Desktop Experience', icon: AppWindow },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 

@@ -1,15 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Activity,
   Play,
   Pause,
   Clock,
   Settings as SettingsIcon,
   Zap,
-  Cpu,
-  Radio,
+  AppWindow,
+  Gamepad2,
 } from 'lucide-react';
 import { useSystemStore } from '../store/systemStore';
+import { useDesktopStore } from '../stores/desktop-store';
+import { useGamingStore } from '../stores/gaming-store';
 import { StatusIndicator } from './StatusIndicator';
 
 export const Header: React.FC = () => {
@@ -23,6 +24,11 @@ export const Header: React.FC = () => {
   const setRefreshInterval = useSystemStore((state) => state.setRefreshInterval);
   const setTurboMode = useSystemStore((state) => state.setTurboMode);
   const tauriStats = useSystemStore((state) => state.tauriStats);
+  const widgetConfig = useDesktopStore((state) => state.config.widget);
+  const toggleFloatingWidget = useDesktopStore((state) => state.toggleFloatingWidget);
+  const gamingStatus = useGamingStore((state) => state.status);
+  const gamingEnabled = useDesktopStore((state) => state.config.gaming.enabled);
+  const toggleGamingMode = useGamingStore((state) => state.toggleGamingMode);
 
   const [secondsAgo, setSecondsAgo] = useState(0);
 
@@ -48,6 +54,10 @@ export const Header: React.FC = () => {
     gpu: { title: 'GPU & VRAM', subtitle: 'Graphics compute pipeline and thermal limits' },
     disk: { title: 'Disk Monitoring', subtitle: 'Storage throughput, partitions, and I/O rates' },
     network: { title: 'Network Activity', subtitle: 'Bandwidth traffic and interface statistics' },
+    desktop: {
+      title: 'Desktop Experience',
+      subtitle: 'Floating widgets, overlays, tray, layouts, themes, shortcuts & gaming HUD',
+    },
     settings: { title: 'Monitor Settings', subtitle: 'Application telemetry and polling preferences' },
   };
 
@@ -169,6 +179,36 @@ export const Header: React.FC = () => {
           }`}
         >
           {isPaused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+        </button>
+
+        {/* Quick Floating Widget Toggle */}
+        <button
+          onClick={() => void toggleFloatingWidget()}
+          id="header-widget-toggle-btn"
+          title="Show/Hide Floating Hardware Widget"
+          className={`px-2 py-1 rounded border flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+            widgetConfig.enabled && widgetConfig.visible
+              ? 'bg-blue-600/20 text-blue-400 border-blue-500/40 font-semibold'
+              : 'bg-[#0B1118] text-slate-400 border-[#1A2633] hover:text-slate-200 hover:bg-[#101720]'
+          }`}
+        >
+          <AppWindow className="w-3.5 h-3.5" />
+          <span className="hidden xl:inline">Widget</span>
+        </button>
+
+        {/* Quick Gaming Mode Toggle */}
+        <button
+          onClick={() => void toggleGamingMode()}
+          id="header-gaming-toggle-btn"
+          title="Enable/Disable Gaming Mode HUD"
+          className={`px-2 py-1 rounded border flex items-center gap-1.5 whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+            gamingStatus.active || gamingEnabled
+              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-semibold'
+              : 'bg-[#0B1118] text-slate-400 border-[#1A2633] hover:text-slate-200 hover:bg-[#101720]'
+          }`}
+        >
+          <Gamepad2 className="w-3.5 h-3.5" />
+          <span className="hidden xl:inline">Gaming</span>
         </button>
 
         {/* Settings Button */}

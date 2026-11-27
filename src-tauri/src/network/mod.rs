@@ -1,7 +1,34 @@
+pub mod connections;
+pub mod history;
+pub mod interfaces;
+#[cfg(target_os = "linux")]
+pub mod linux;
+pub mod models;
+pub mod processes;
+pub mod traffic;
+#[cfg(target_os = "windows")]
+pub mod windows;
+
 use crate::models::{NetworkInterface, NetworkStats, PingResult};
-use std::collections::HashMap;
+use connections::{is_active_connection_state, ConnectionTracker};
+use history::NetworkHistoryStore;
+use interfaces::{collect_interfaces, pick_default_active_interface};
+use models::{
+    NetworkAttributionCapabilities, NetworkConnection, NetworkHistoryResponse,
+    NetworkTrafficOverview, PlatformSocketSnapshot, ProcessNetworkDetails, ProcessNetworkUsage,
+};
+use processes::ProcessNetworkTracker;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use sysinfo::Networks;
+use sysinfo::{Networks, Pid, System};
+use traffic::TrafficAggregator;
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkStreamPayload {
+    pub overview: NetworkTrafficOverview,
+    pub processes: Vec<ProcessNetworkUsage>,
+    pub connections: Vec<NetworkConnection>,
+}
 
 pub struct NetworkMonitor {
     last_sample: Instant,
@@ -18,97 +45,23 @@ impl NetworkMonitor {
         let elapsed_secs = self.last_sample.elapsed().as_secs_f64().max(0.05);
         self.last_sample = Instant::now();
 
-        #[cfg(target_os = "linux")]
-        let os_ifaces = collect_linux_ifaces();
-        #[cfg(target_os = "windows")]
-        let os_ifaces = collect_windows_ifaces();
-        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-        let os_ifaces: HashMap<String, OsInterfaceMeta> = HashMap::new();
+        let interfaces = collect_interfaces(networks, elapsed_secs);
 
-        let mut interfaces = Vec::new();
         let mut total_rx_sec = 0u64;
         let mut total_tx_sec = 0u64;
         let mut total_rx_bytes = 0u64;
         let mut total_tx_bytes = 0u64;
 
-        for (name, data) in networks.iter() {
-            let rx_speed = ((data.received() as f64) / elapsed_secs).round() as u64;
-            let tx_speed = ((data.transmitted() as f64) / elapsed_secs).round() as u64;
-            let rx_total = data.total_received();
-            let tx_total = data.total_transmitted();
-
-            let meta = os_ifaces.get(name).or_else(|| {
-                let lower = name.to_lowercase();
-                os_ifaces
-                    .iter()
-                    .find(|(k, v)| {
-                        k.to_lowercase() == lower
-                            || v.display_name.to_lowercase() == lower
-                    })
-                    .map(|(_, v)| v)
-            });
-
-            let iface_type = meta
-                .map(|m| m.iface_type.clone())
-                .unwrap_or_else(|| classify_interface_name(name));
-
-            let is_up = meta.map(|m| m.is_up).unwrap_or(true);
-            let mac = meta.and_then(|m| m.mac.clone()).or_else(|| {
-                let m_str = data.mac_address().to_string();
-                if m_str.is_empty() || m_str == "00:00:00:00:00:00" {
-                    None
-                } else {
-                    Some(m_str)
-                }
-            });
-
-            if iface_type != "loopback" {
-                total_rx_sec = total_rx_sec.saturating_add(rx_speed);
-                total_tx_sec = total_tx_sec.saturating_add(tx_speed);
-                total_rx_bytes = total_rx_bytes.saturating_add(rx_total);
-                total_tx_bytes = total_tx_bytes.saturating_add(tx_total);
+        for iface in &interfaces {
+            if iface.r#type != "loopback" {
+                total_rx_sec = total_rx_sec.saturating_add(iface.rx_speed_bytes_sec);
+                total_tx_sec = total_tx_sec.saturating_add(iface.tx_speed_bytes_sec);
+                total_rx_bytes = total_rx_bytes.saturating_add(iface.rx_bytes_total);
+                total_tx_bytes = total_tx_bytes.saturating_add(iface.tx_bytes_total);
             }
-
-            interfaces.push(NetworkInterface {
-                name: name.clone(),
-                display_name: meta
-                    .map(|m| m.display_name.clone())
-                    .unwrap_or_else(|| name.clone()),
-                r#type: iface_type,
-                ip4: meta.and_then(|m| m.ip4.clone()),
-                ip6: meta.and_then(|m| m.ip6.clone()),
-                mac,
-                is_up,
-                rx_bytes_total: rx_total,
-                tx_bytes_total: tx_total,
-                rx_speed_bytes_sec: rx_speed,
-                tx_speed_bytes_sec: tx_speed,
-                packet_loss_percent: None,
-            });
         }
 
-        // Sort active non-loopback interfaces first
-        interfaces.sort_by(|a, b| {
-            let score = |i: &NetworkInterface| -> (u8, u64) {
-                let up_score = if i.is_up && i.r#type != "loopback" {
-                    0
-                } else if i.is_up {
-                    1
-                } else {
-                    2
-                };
-                (up_score, std::cmp::Reverse(i.rx_bytes_total + i.tx_bytes_total).0)
-            };
-            score(a).cmp(&score(b))
-        });
-
-        let active_interface = interfaces
-            .iter()
-            .find(|i| i.is_up && i.r#type != "loopback" && i.ip4.is_some())
-            .or_else(|| interfaces.iter().find(|i| i.is_up && i.r#type != "loopback"))
-            .or_else(|| interfaces.first())
-            .map(|i| i.name.clone())
-            .unwrap_or_else(|| "N/A".to_string());
+        let active_interface = pick_default_active_interface(&interfaces);
 
         NetworkStats {
             download_speed_bytes_sec: total_rx_sec,
@@ -121,273 +74,283 @@ impl NetworkMonitor {
     }
 }
 
-struct OsInterfaceMeta {
-    display_name: String,
-    iface_type: String,
-    is_up: bool,
-    ip4: Option<String>,
-    ip6: Option<String>,
-    mac: Option<String>,
+pub struct AdvancedNetworkMonitor {
+    traffic: TrafficAggregator,
+    conn_tracker: ConnectionTracker,
+    proc_tracker: ProcessNetworkTracker,
+    history: NetworkHistoryStore,
+    last_interfaces: Vec<NetworkInterface>,
+    last_connections: Vec<NetworkConnection>,
+    last_processes: Vec<ProcessNetworkUsage>,
+    last_capabilities: NetworkAttributionCapabilities,
+    last_overview: Option<NetworkTrafficOverview>,
 }
 
-fn classify_interface_name(name: &str) -> String {
-    let lower = name.to_lowercase();
-    if lower == "lo" || lower.contains("loopback") {
-        "loopback".to_string()
-    } else if lower.starts_with("wl")
-        || lower.contains("wi-fi")
-        || lower.contains("wifi")
-        || lower.contains("wlan")
-        || lower.contains("wireless")
-    {
-        "wifi".to_string()
-    } else if lower.starts_with("wg")
-        || lower.starts_with("tun")
-        || lower.starts_with("tap")
-        || lower.starts_with("ppp")
-        || lower.contains("vpn")
-        || lower.contains("tailscale")
-        || lower.contains("wireguard")
-        || lower.contains("zerotier")
-        || lower.contains("openvpn")
-    {
-        "vpn".to_string()
-    } else if lower.starts_with("docker")
-        || lower.starts_with("br-")
-        || lower.starts_with("veth")
-        || lower.starts_with("virbr")
-        || lower.starts_with("vmnet")
-        || lower.starts_with("vboxnet")
-        || lower.contains("vethernet")
-        || lower.contains("hyper-v")
-        || lower.contains("virtual")
-        || lower.contains("wsl")
-    {
-        "virtual".to_string()
-    } else {
-        "ethernet".to_string()
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn collect_linux_ifaces() -> HashMap<String, OsInterfaceMeta> {
-    use std::ffi::CStr;
-    use std::fs;
-    use std::path::Path;
-
-    let mut map: HashMap<String, OsInterfaceMeta> = HashMap::new();
-
-    if let Ok(entries) = fs::read_dir("/sys/class/net") {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let path = entry.path();
-
-            let operstate = fs::read_to_string(path.join("operstate"))
-                .unwrap_or_default()
-                .trim()
-                .to_lowercase();
-            let is_up = operstate == "up" || (name == "lo" && operstate == "unknown");
-
-            let mac = fs::read_to_string(path.join("address"))
-                .ok()
-                .map(|s| s.trim().to_uppercase())
-                .filter(|s| !s.is_empty() && s != "00:00:00:00:00:00");
-
-            let iface_type = if name == "lo" {
-                "loopback".to_string()
-            } else if Path::new(&format!("/sys/class/net/{}/wireless", name)).exists() {
-                "wifi".to_string()
-            } else if Path::new(&format!("/sys/class/net/{}/tun_flags", name)).exists() {
-                "vpn".to_string()
-            } else {
-                classify_interface_name(&name)
-            };
-
-            map.insert(
-                name.clone(),
-                OsInterfaceMeta {
-                    display_name: name,
-                    iface_type,
-                    is_up,
-                    ip4: None,
-                    ip6: None,
-                    mac,
-                },
-            );
+impl AdvancedNetworkMonitor {
+    pub fn new() -> Self {
+        Self {
+            traffic: TrafficAggregator::new(),
+            conn_tracker: ConnectionTracker::new(),
+            proc_tracker: ProcessNetworkTracker::new(),
+            history: NetworkHistoryStore::new(),
+            last_interfaces: Vec::new(),
+            last_connections: Vec::new(),
+            last_processes: Vec::new(),
+            last_capabilities: default_capabilities(),
+            last_overview: None,
         }
     }
 
-    unsafe {
-        let mut ifap: *mut libc::ifaddrs = std::ptr::null_mut();
-        if libc::getifaddrs(&mut ifap) == 0 && !ifap.is_null() {
-            let mut cur = ifap;
-            while !cur.is_null() {
-                let ifa = &*cur;
-                if !ifa.ifa_name.is_null() && !ifa.ifa_addr.is_null() {
-                    let name = CStr::from_ptr(ifa.ifa_name).to_string_lossy().to_string();
-                    let family = (*ifa.ifa_addr).sa_family as i32;
-                    let entry = map.entry(name.clone()).or_insert_with(|| OsInterfaceMeta {
-                        display_name: name.clone(),
-                        iface_type: classify_interface_name(&name),
-                        is_up: (ifa.ifa_flags as i32 & libc::IFF_UP) != 0,
-                        ip4: None,
-                        ip6: None,
-                        mac: None,
-                    });
-
-                    if family == libc::AF_INET {
-                        let sa = &*(ifa.ifa_addr as *const libc::sockaddr_in);
-                        let bytes = sa.sin_addr.s_addr.to_ne_bytes();
-                        if entry.ip4.is_none() {
-                            entry.ip4 = Some(format!("{}.{}.{}.{}", bytes[0], bytes[1], bytes[2], bytes[3]));
-                        }
-                    } else if family == libc::AF_INET6 {
-                        let sa6 = &*(ifa.ifa_addr as *const libc::sockaddr_in6);
-                        let ip6 = std::net::Ipv6Addr::from(sa6.sin6_addr.s6_addr);
-                        // Prefer non-link-local if available, otherwise keep first IPv6
-                        if entry.ip6.is_none() || entry.ip6.as_deref().map(|s| s.starts_with("fe80:")).unwrap_or(false) {
-                            entry.ip6 = Some(ip6.to_string());
-                        }
-                    }
-                }
-                cur = ifa.ifa_next;
-            }
-            libc::freeifaddrs(ifap);
-        }
+    pub fn set_interface(&mut self, iface: String) -> String {
+        self.traffic.set_selected_interface(iface);
+        self.traffic.selected_interface().to_string()
     }
 
-    map
-}
+    /// Lightweight update from SystemOverview loop so 24h/7d traffic history stays populated
+    /// without running expensive socket/fd scans when Network page is inactive.
+    pub fn record_lightweight_tick(&mut self, net_stats: &NetworkStats, timestamp_ms: u64) {
+        self.last_interfaces = net_stats.interfaces.clone();
+        let agg = self.traffic.update(&net_stats.interfaces);
+        let active_conns = self
+            .last_connections
+            .iter()
+            .filter(|c| is_active_connection_state(&c.state))
+            .count();
 
-#[cfg(target_os = "windows")]
-fn collect_windows_ifaces() -> HashMap<String, OsInterfaceMeta> {
-    use windows::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, NO_ERROR};
-    use windows::Win32::NetworkManagement::IpHelper::{
-        GetAdaptersAddresses, GAA_FLAG_INCLUDE_PREFIX, IP_ADAPTER_ADDRESSES_LH,
-    };
-    use windows::Win32::Networking::WinSock::{
-        AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6,
-    };
-
-    let mut map = HashMap::new();
-
-    unsafe {
-        let mut buf_len: u32 = 32_768;
-        let mut buffer = vec![0u8; buf_len as usize];
-
-        let mut res = GetAdaptersAddresses(
-            AF_UNSPEC.0 as u32,
-            GAA_FLAG_INCLUDE_PREFIX,
-            None,
-            Some(buffer.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH),
-            &mut buf_len,
+        self.history.record_sample(
+            &agg.selected_interface,
+            timestamp_ms,
+            agg.download_speed,
+            agg.upload_speed,
+            agg.delta_rx,
+            agg.delta_tx,
+            active_conns,
+            &[],
         );
-        if res == ERROR_BUFFER_OVERFLOW.0 {
-            buffer.resize(buf_len as usize, 0);
-            res = GetAdaptersAddresses(
-                AF_UNSPEC.0 as u32,
-                GAA_FLAG_INCLUDE_PREFIX,
-                None,
-                Some(buffer.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES_LH),
-                &mut buf_len,
-            );
-        }
 
-        if res != NO_ERROR.0 {
-            return map;
-        }
+        self.last_overview = Some(NetworkTrafficOverview {
+            selected_interface: agg.selected_interface,
+            active_interface: net_stats.active_interface.clone(),
+            download_speed_bytes_sec: agg.download_speed,
+            upload_speed_bytes_sec: agg.upload_speed,
+            peak_download_bytes_sec: agg.peak_download_speed,
+            peak_upload_bytes_sec: agg.peak_upload_speed,
+            total_downloaded_bytes: agg.total_downloaded,
+            total_uploaded_bytes: agg.total_uploaded,
+            session_downloaded_bytes: agg.session_downloaded,
+            session_uploaded_bytes: agg.session_uploaded,
+            active_connections_count: active_conns,
+            total_connections_count: self.last_connections.len(),
+            interfaces: net_stats.interfaces.clone(),
+            capabilities: self.last_capabilities.clone(),
+            timestamp: timestamp_ms,
+        });
+    }
 
-        let mut curr = buffer.as_ptr() as *const IP_ADAPTER_ADDRESSES_LH;
-        while !curr.is_null() {
-            let adapter = &*curr;
-            let friendly = if !adapter.FriendlyName.is_null() {
-                adapter.FriendlyName.to_string().unwrap_or_default()
-            } else {
-                String::new()
-            };
-            let desc = if !adapter.Description.is_null() {
-                adapter.Description.to_string().unwrap_or_default()
-            } else {
-                friendly.clone()
-            };
+    /// Full native socket, connection, and per-process network telemetry collection.
+    pub fn collect_full(&mut self, net_stats: &NetworkStats, sys: &System) -> NetworkStreamPayload {
+        let now_ms = current_timestamp_ms();
+        self.last_interfaces = net_stats.interfaces.clone();
+        let agg = self.traffic.update(&net_stats.interfaces);
 
-            let key = if !friendly.is_empty() {
-                friendly.clone()
-            } else {
-                desc.clone()
-            };
+        let snapshot = collect_platform_sockets();
+        self.last_capabilities = snapshot.capabilities.clone();
 
-            // IfType constants: 71 = IEEE80211, 24 = SOFTWARE_LOOPBACK, 131 = TUNNEL, 6 = ETHERNET_CSMACD
-            let iface_type = match adapter.IfType {
-                24 => "loopback".to_string(),
-                71 => "wifi".to_string(),
-                131 => "vpn".to_string(),
-                _ => {
-                    let hint = format!("{} {}", friendly, desc);
-                    classify_interface_name(&hint)
-                }
-            };
+        let connections = self.conn_tracker.build_connections(&snapshot, sys);
+        let active_conns = connections
+            .iter()
+            .filter(|c| is_active_connection_state(&c.state))
+            .count();
 
-            // IfOperStatusUp == 1
-            let is_up = adapter.OperStatus.0 == 1;
+        let system_total_speed = agg.download_speed.saturating_add(agg.upload_speed);
+        let processes = self
+            .proc_tracker
+            .collect(&snapshot, sys, system_total_speed);
 
-            let mac = if adapter.PhysicalAddressLength == 6 {
-                let b = &adapter.PhysicalAddress[..6];
-                if b.iter().all(|&x| x == 0) {
-                    None
-                } else {
-                    Some(format!(
-                        "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-                        b[0], b[1], b[2], b[3], b[4], b[5]
-                    ))
-                }
-            } else {
-                None
-            };
+        self.history.record_sample(
+            &agg.selected_interface,
+            now_ms,
+            agg.download_speed,
+            agg.upload_speed,
+            agg.delta_rx,
+            agg.delta_tx,
+            active_conns,
+            &processes,
+        );
 
-            let mut ip4: Option<String> = None;
-            let mut ip6: Option<String> = None;
+        let overview = NetworkTrafficOverview {
+            selected_interface: agg.selected_interface,
+            active_interface: net_stats.active_interface.clone(),
+            download_speed_bytes_sec: agg.download_speed,
+            upload_speed_bytes_sec: agg.upload_speed,
+            peak_download_bytes_sec: agg.peak_download_speed,
+            peak_upload_bytes_sec: agg.peak_upload_speed,
+            total_downloaded_bytes: agg.total_downloaded,
+            total_uploaded_bytes: agg.total_uploaded,
+            session_downloaded_bytes: agg.session_downloaded,
+            session_uploaded_bytes: agg.session_uploaded,
+            active_connections_count: active_conns,
+            total_connections_count: connections.len(),
+            interfaces: net_stats.interfaces.clone(),
+            capabilities: snapshot.capabilities,
+            timestamp: now_ms,
+        };
 
-            let mut unicast = adapter.FirstUnicastAddress;
-            while !unicast.is_null() {
-                let u = &*unicast;
-                let sa = u.Address.lpSockaddr;
-                if !sa.is_null() {
-                    let family = (*sa).sa_family;
-                    if family == AF_INET && ip4.is_none() {
-                        let sa_in = &*(sa as *const SOCKADDR_IN);
-                        let addr4 = std::net::Ipv4Addr::from(u32::from_be(sa_in.sin_addr.S_un.S_addr));
-                        ip4 = Some(addr4.to_string());
-                    } else if family == AF_INET6 {
-                        let sa_in6 = &*(sa as *const SOCKADDR_IN6);
-                        let addr6 = std::net::Ipv6Addr::from(sa_in6.sin6_addr.u.Byte);
-                        if ip6.is_none() || ip6.as_deref().map(|s| s.starts_with("fe80:")).unwrap_or(false) {
-                            ip6 = Some(addr6.to_string());
-                        }
-                    }
-                }
-                unicast = u.Next;
-            }
+        self.last_overview = Some(overview.clone());
+        self.last_connections = connections.clone();
+        self.last_processes = processes.clone();
 
-            if !key.is_empty() {
-                map.insert(
-                    key.clone(),
-                    OsInterfaceMeta {
-                        display_name: if !desc.is_empty() { desc } else { key },
-                        iface_type,
-                        is_up,
-                        ip4,
-                        ip6,
-                        mac,
-                    },
-                );
-            }
-
-            curr = adapter.Next;
+        NetworkStreamPayload {
+            overview,
+            processes,
+            connections,
         }
     }
 
-    map
+    pub fn get_cached_interfaces(&self) -> Vec<NetworkInterface> {
+        self.last_interfaces.clone()
+    }
+
+    pub fn get_cached_connections(&self) -> Vec<NetworkConnection> {
+        self.last_connections.clone()
+    }
+
+    pub fn get_cached_processes(&self) -> Vec<ProcessNetworkUsage> {
+        self.last_processes.clone()
+    }
+
+    pub fn get_process_details(&self, pid: u32, sys: &System) -> Option<ProcessNetworkDetails> {
+        let usage = self
+            .last_processes
+            .iter()
+            .find(|p| p.pid == pid)
+            .cloned()
+            .or_else(|| {
+                sys.process(Pid::from_u32(pid)).map(|p| ProcessNetworkUsage {
+                    pid,
+                    name: p.name().to_string(),
+                    executable_path: p
+                        .exe()
+                        .map(|e| e.to_string_lossy().to_string())
+                        .filter(|s| !s.is_empty()),
+                    user: None,
+                    category: "app".to_string(),
+                    download_speed_bytes_sec: if self.last_capabilities.per_process_bytes_supported {
+                        Some(0)
+                    } else {
+                        None
+                    },
+                    upload_speed_bytes_sec: if self.last_capabilities.per_process_bytes_supported {
+                        Some(0)
+                    } else {
+                        None
+                    },
+                    total_downloaded_bytes: if self.last_capabilities.per_process_bytes_supported {
+                        Some(0)
+                    } else {
+                        None
+                    },
+                    total_uploaded_bytes: if self.last_capabilities.per_process_bytes_supported {
+                        Some(0)
+                    } else {
+                        None
+                    },
+                    combined_speed_bytes_sec: if self.last_capabilities.per_process_bytes_supported {
+                        Some(0)
+                    } else {
+                        None
+                    },
+                    combined_total_bytes: if self.last_capabilities.per_process_bytes_supported {
+                        Some(0)
+                    } else {
+                        None
+                    },
+                    traffic_share_percent: if self.last_capabilities.per_process_bytes_supported {
+                        Some(0.0)
+                    } else {
+                        None
+                    },
+                    is_measured: self.last_capabilities.per_process_bytes_supported,
+                    measurement_source: if self.last_capabilities.per_process_bytes_supported {
+                        "kernel".to_string()
+                    } else {
+                        "socket_ownership_only".to_string()
+                    },
+                    active_connections: 0,
+                    total_sockets: 0,
+                    protocols: vec![],
+                    status: "idle".to_string(),
+                })
+            })?;
+
+        let connections: Vec<NetworkConnection> = self
+            .last_connections
+            .iter()
+            .filter(|c| c.pid == Some(pid))
+            .cloned()
+            .collect();
+
+        let history = self.history.get_process_history(pid);
+
+        Some(ProcessNetworkDetails {
+            usage,
+            connections,
+            history,
+            capabilities: self.last_capabilities.clone(),
+        })
+    }
+
+    pub fn get_history(&self, period: &str, interface_name: Option<&str>) -> NetworkHistoryResponse {
+        let iface = interface_name
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| self.traffic.selected_interface());
+        self.history
+            .query_history(period, iface, current_timestamp_ms(), &self.last_processes)
+    }
+
+    pub fn flush_history(&mut self) {
+        self.history.flush_to_disk();
+    }
+}
+
+fn collect_platform_sockets() -> PlatformSocketSnapshot {
+    #[cfg(target_os = "linux")]
+    {
+        linux::collect_linux_sockets()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        windows::collect_windows_sockets()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        PlatformSocketSnapshot {
+            sockets: Vec::new(),
+            capabilities: default_capabilities(),
+        }
+    }
+}
+
+fn default_capabilities() -> NetworkAttributionCapabilities {
+    NetworkAttributionCapabilities {
+        level: "unavailable".to_string(),
+        per_process_bytes_supported: false,
+        is_elevated: false,
+        platform_method: "Unsupported Platform".to_string(),
+        limitation_reason: Some(
+            "Per-process network attribution is currently implemented for Linux and Windows."
+                .to_string(),
+        ),
+        unreadable_process_count: 0,
+    }
+}
+
+fn current_timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn is_valid_ping_target(target: &str) -> bool {
@@ -417,7 +380,6 @@ pub async fn ping_target(target: String, port: Option<u16>) -> PingResult {
         };
     }
 
-    // 1. Try native OS ICMP ping first
     let icmp_res = tokio::task::spawn_blocking({
         let t = clean_target.clone();
         move || run_native_icmp_ping(&t)
@@ -437,7 +399,6 @@ pub async fn ping_target(target: String, port: Option<u16>) -> PingResult {
         };
     }
 
-    // 2. Fallback to TCP connect probe (works in restricted containers/firewalls)
     let probe_port = port.unwrap_or(443);
     let addr = if clean_target.contains(':') && !clean_target.starts_with('[') {
         format!("[{}]:{}", clean_target, probe_port)

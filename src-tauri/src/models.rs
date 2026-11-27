@@ -99,10 +99,16 @@ pub struct NetworkInterface {
     pub ip6: Option<String>,
     pub mac: Option<String>,
     pub is_up: bool,
+    pub speed_mbps: Option<u64>,
+    pub mtu: Option<u32>,
     pub rx_bytes_total: u64,
     pub tx_bytes_total: u64,
     pub rx_speed_bytes_sec: u64,
     pub tx_speed_bytes_sec: u64,
+    pub rx_packets: Option<u64>,
+    pub tx_packets: Option<u64>,
+    pub rx_errors: Option<u64>,
+    pub tx_errors: Option<u64>,
     pub packet_loss_percent: Option<f32>,
 }
 

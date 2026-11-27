@@ -1,23 +1,58 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
   :root {
+    --bg-main: #f1f5f9;
+    --bg-surface: #ffffff;
+    --bg-card: #ffffff;
+    --bg-card-alt: #f8fafc;
+    --border-color: #cbd5e1;
+    --border-subtle: #e2e8f0;
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+    --accent-color: #3b82f6;
+    --ui-radius: 10px;
+    --color-cpu: #3b82f6;
+    --color-gpu: #06b6d4;
+    --color-memory: #10b981;
+    --color-network: #ec4899;
+    --color-battery: #f59e0b;
+    --color-fps: #22c55e;
+  }
+
+  .dark {
     --bg-main: #05070a;
     --bg-surface: #080b10;
     --bg-card: #0b1118;
     --bg-card-alt: #101720;
     --border-color: #1a2633;
     --border-subtle: #131c26;
+    --text-primary: #f1f5f9;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --accent-color: #3b82f6;
+    --ui-radius: 10px;
   }
 
+  html,
   body {
-    background-color: #05070a;
-    color: #f1f5f9;
+    background-color: var(--bg-main);
+    color: var(--text-primary);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     overflow-x: hidden;
     user-select: none;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  html.transparent-window,
+  html.transparent-window body,
+  body.transparent-window {
+    background: transparent !important;
+    background-color: transparent !important;
+    overflow: hidden;
   }
 
   /* Monospace font for telemetry and metrics */
@@ -27,6 +62,65 @@
   }
 }
 
+/* Light-theme adaptation for legacy dark utility classes inside existing subpages */
+html:not(.dark) .bg-\[\#05070A\],
+html:not(.dark) .bg-\[\#05070a\] {
+  background-color: var(--bg-main) !important;
+}
+
+html:not(.dark) .bg-\[\#080B10\],
+html:not(.dark) .bg-\[\#080b10\] {
+  background-color: var(--bg-surface) !important;
+}
+
+html:not(.dark) .bg-\[\#0B1118\],
+html:not(.dark) .bg-\[\#0b1118\],
+html:not(.dark) .bg-\[\#0B1118\]\/95 {
+  background-color: var(--bg-card) !important;
+}
+
+html:not(.dark) .bg-\[\#101720\],
+html:not(.dark) .bg-\[\#080d14\],
+html:not(.dark) .bg-\[\#0d141d\] {
+  background-color: var(--bg-card-alt) !important;
+}
+
+html:not(.dark) .border-\[\#1A2633\],
+html:not(.dark) .border-\[\#1a2633\] {
+  border-color: var(--border-color) !important;
+}
+
+html:not(.dark) .border-\[\#14202c\],
+html:not(.dark) .border-\[\#131c26\] {
+  border-color: var(--border-subtle) !important;
+}
+
+html:not(.dark) .text-slate-100,
+html:not(.dark) .text-slate-200 {
+  color: var(--text-primary) !important;
+}
+
+html:not(.dark) .text-slate-300 {
+  color: var(--text-secondary) !important;
+}
+
+html:not(.dark) .text-slate-400,
+html:not(.dark) .text-slate-500 {
+  color: var(--text-muted) !important;
+}
+
+html[data-font-size="sm"] {
+  font-size: 14px;
+}
+
+html[data-font-size="md"] {
+  font-size: 16px;
+}
+
+html[data-font-size="lg"] {
+  font-size: 17.5px;
+}
+
 /* Desktop custom slim scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -34,16 +128,16 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #080b10;
+  background: var(--bg-surface);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1a2633;
+  background: var(--border-color);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #25384d;
+  background: var(--text-muted);
 }
 
 /* Subtle glow helpers */
@@ -66,4 +160,3 @@
 .glow-red {
   box-shadow: 0 0 15px rgba(239, 68, 68, 0.2);
 }
-

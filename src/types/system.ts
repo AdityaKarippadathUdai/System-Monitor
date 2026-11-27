@@ -85,10 +85,16 @@ export interface NetworkInterface {
   ip6: string | null;
   mac: string | null;
   isUp: boolean;
+  speedMbps?: number | null;
+  mtu?: number | null;
   rxBytesTotal: number;
   txBytesTotal: number;
   rxSpeedBytesSec: number;
   txSpeedBytesSec: number;
+  rxPackets?: number | null;
+  txPackets?: number | null;
+  rxErrors?: number | null;
+  txErrors?: number | null;
   packetLossPercent: number | null;
 }
 
@@ -99,6 +105,124 @@ export interface NetworkStats {
   totalUploadedBytes: number;
   activeInterface: string;
   interfaces: NetworkInterface[];
+}
+
+export type NetworkAttributionLevel = 'full' | 'partial' | 'connections_only' | 'unavailable';
+
+export interface NetworkAttributionCapabilities {
+  level: NetworkAttributionLevel;
+  perProcessBytesSupported: boolean;
+  isElevated: boolean;
+  platformMethod: string;
+  limitationReason: string | null;
+  unreadableProcessCount: number;
+}
+
+export interface NetworkTrafficOverview {
+  selectedInterface: string;
+  activeInterface: string;
+  downloadSpeedBytesSec: number;
+  uploadSpeedBytesSec: number;
+  peakDownloadBytesSec: number;
+  uploadSpeedPeakBytesSec?: number;
+  peakUploadBytesSec: number;
+  totalDownloadedBytes: number;
+  totalUploadedBytes: number;
+  sessionDownloadedBytes: number;
+  sessionUploadedBytes: number;
+  activeConnectionsCount: number;
+  totalConnectionsCount: number;
+  interfaces: NetworkInterface[];
+  capabilities: NetworkAttributionCapabilities;
+  timestamp: number;
+}
+
+export interface NetworkConnection {
+  id: string;
+  pid: number | null;
+  processName: string;
+  executablePath: string | null;
+  protocol: string;
+  localAddress: string;
+  localPort: number;
+  remoteAddress: string;
+  remotePort: number | null;
+  state: string;
+  isLoopback: boolean;
+  rxBytesTotal: number | null;
+  txBytesTotal: number | null;
+  rxSpeedBytesSec: number | null;
+  txSpeedBytesSec: number | null;
+}
+
+export interface ProcessNetworkUsage {
+  pid: number;
+  name: string;
+  executablePath: string | null;
+  user: string | null;
+  category: 'app' | 'background' | 'system' | string;
+  downloadSpeedBytesSec: number | null;
+  uploadSpeedBytesSec: number | null;
+  totalDownloadedBytes: number | null;
+  totalUploadedBytes: number | null;
+  combinedSpeedBytesSec: number | null;
+  combinedTotalBytes: number | null;
+  trafficSharePercent: number | null;
+  isMeasured: boolean;
+  measurementSource: string;
+  activeConnections: number;
+  totalSockets: number;
+  protocols: string[];
+  status: string;
+}
+
+export type NetworkTimePeriod = '1m' | '5m' | '15m' | '30m' | '1h' | '24h' | '7d';
+export type BandwidthUnit = 'bytes' | 'bits';
+
+export interface NetworkHistoryPoint {
+  timestamp: number;
+  timeLabel: string;
+  downloadBytesSec: number;
+  uploadBytesSec: number;
+  peakDownloadBytesSec: number;
+  peakUploadBytesSec: number;
+  downloadedDeltaBytes: number;
+  uploadedDeltaBytes: number;
+  activeConnections: number;
+}
+
+export interface ProcessHistorySummary {
+  pid: number;
+  name: string;
+  totalDownloadedBytes: number;
+  totalUploadedBytes: number;
+  peakDownloadBytesSec: number;
+  peakUploadBytesSec: number;
+  isMeasured: boolean;
+}
+
+export interface NetworkHistoryResponse {
+  period: NetworkTimePeriod | string;
+  interfaceName: string;
+  points: NetworkHistoryPoint[];
+  peakDownloadBytesSec: number;
+  peakUploadBytesSec: number;
+  totalDownloadedBytes: number;
+  totalUploadedBytes: number;
+  topApplications: ProcessHistorySummary[];
+}
+
+export interface ProcessNetworkDetails {
+  usage: ProcessNetworkUsage;
+  connections: NetworkConnection[];
+  history: NetworkHistoryPoint[];
+  capabilities: NetworkAttributionCapabilities;
+}
+
+export interface NetworkStreamPayload {
+  overview: NetworkTrafficOverview;
+  processes: ProcessNetworkUsage[];
+  connections: NetworkConnection[];
 }
 
 export interface SystemInfo {

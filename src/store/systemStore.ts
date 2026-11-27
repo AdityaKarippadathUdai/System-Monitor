@@ -12,6 +12,7 @@ export type AppPage =
   | 'gpu'
   | 'disk'
   | 'network'
+  | 'desktop'
   | 'settings';
 
 export interface UserSettings {

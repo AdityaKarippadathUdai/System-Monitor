@@ -14,9 +14,14 @@ import { Cpu, MemoryStick, MonitorCog, HardDrive, Network } from 'lucide-react';
 interface LiveChartProps {
   data: MetricHistoryPoint[];
   className?: string;
+  chartHeightClass?: string;
 }
 
-export const LiveChart: React.FC<LiveChartProps> = ({ data, className = '' }) => {
+export const LiveChart: React.FC<LiveChartProps> = ({
+  data,
+  className = '',
+  chartHeightClass = 'h-64',
+}) => {
   const [showCpu, setShowCpu] = useState(true);
   const [showMemory, setShowMemory] = useState(true);
   const [showGpu, setShowGpu] = useState(true);
@@ -150,7 +155,7 @@ export const LiveChart: React.FC<LiveChartProps> = ({ data, className = '' }) =>
       </div>
 
       {/* Main Chart Area */}
-      <div className="h-64 w-full">
+      <div className={`${chartHeightClass} w-full`}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
             <defs>
