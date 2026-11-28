@@ -44,6 +44,22 @@ export const GamingOverlayWindow: React.FC<GamingOverlayWindowProps> = ({
     .filter((c) => c.supported || c.key === 'fps' || c.key === 'net_latency');
 
   const opacity = Math.min(1, Math.max(0.25, gamingCfg.opacity));
+  const metricColors = storeConfig.appearance.metricColors;
+  const textSizeClass =
+    gamingCfg.textSize === 'sm'
+      ? 'text-[10px]'
+      : gamingCfg.textSize === 'lg'
+      ? 'text-xs'
+      : 'text-[11px]';
+
+  const getCustomAccent = (key: string): string | undefined => {
+    if (key.startsWith('cpu')) return metricColors.cpu;
+    if (key.startsWith('gpu') || key === 'vram_usage') return metricColors.gpu;
+    if (key === 'ram_usage') return metricColors.memory;
+    if (key.startsWith('net')) return metricColors.network;
+    if (key === 'fps') return metricColors.fps;
+    return undefined;
+  };
 
   return (
     <div
@@ -91,15 +107,24 @@ export const GamingOverlayWindow: React.FC<GamingOverlayWindowProps> = ({
             : cell.severity === 'warning'
             ? 'text-amber-400'
             : 'text-slate-100';
+          const labelDotColor = getCustomAccent(cell.key);
 
           return isCompact ? (
-            <div key={cell.key} className="flex items-baseline gap-1 text-[11px] whitespace-nowrap">
+            <div key={cell.key} className={`flex items-baseline gap-1 ${textSizeClass} whitespace-nowrap`}>
               <span className="text-slate-400">{cell.shortLabel}</span>
               <span className={`font-bold ${valueColor}`}>{cell.valueText}</span>
             </div>
           ) : (
-            <div key={cell.key} className="flex items-center justify-between text-[11px] gap-2">
-              <span className="text-slate-400">{cell.label}</span>
+            <div key={cell.key} className={`flex items-center justify-between ${textSizeClass} gap-2`}>
+              <span className="text-slate-400 flex items-center gap-1.5">
+                {labelDotColor && (
+                  <span
+                    className="w-1.5 h-1.5 rounded-full shrink-0"
+                    style={{ backgroundColor: labelDotColor }}
+                  />
+                )}
+                <span>{cell.label}</span>
+              </span>
               <span className={`font-bold ${valueColor}`}>
                 {cell.valueText}
                 {isFps && fps.available && fps.frameTimeMs !== null && (

@@ -733,11 +733,13 @@ fn main() {
                     return;
                 }
                 state.shutdown.store(true, Ordering::SeqCst);
+                state.shortcuts.shutdown();
                 state.engine.flush_network_history();
             }
         } else if let tauri::RunEvent::Exit = event {
             if let Some(state) = app_handle.try_state::<AppState>() {
                 state.shutdown.store(true, Ordering::SeqCst);
+                state.shortcuts.shutdown();
                 state.engine.flush_network_history();
             }
         }

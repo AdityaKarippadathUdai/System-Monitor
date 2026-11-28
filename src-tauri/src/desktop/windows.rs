@@ -220,7 +220,12 @@ pub fn ensure_floating_widget(
     .visible(true);
 
     if caps.positioning_supported {
-        builder = builder.position(cfg.widget.x as f64, cfg.widget.y as f64);
+        let (wx, wy) = if cfg.startup.restore_widget_position {
+            (cfg.widget.x as f64, cfg.widget.y as f64)
+        } else {
+            (36.0, 48.0)
+        };
+        builder = builder.position(wx, wy);
     }
 
     if let Ok(win) = builder.build() {

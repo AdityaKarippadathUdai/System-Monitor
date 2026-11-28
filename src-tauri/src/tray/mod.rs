@@ -32,7 +32,7 @@ impl TrayController {
 
         let header_item = MenuItem::with_id(app, "tray_header", "SysMon Pro", false, None::<&str>)
             .map_err(|e| format!("Failed to build tray header: {}", e))?;
-        let open_item = MenuItem::with_id(app, "open_dashboard", "Open Dashboard", true, None::<&str>)
+        let open_item = MenuItem::with_id(app, "open_dashboard", "Open SysMon Pro", true, None::<&str>)
             .map_err(|e| format!("Failed to build tray open item: {}", e))?;
         let widget_item = MenuItem::with_id(
             app,
@@ -78,6 +78,14 @@ impl TrayController {
             None::<&str>,
         )
         .map_err(|e| format!("Failed to build tray monitoring item: {}", e))?;
+        let click_through_item = MenuItem::with_id(
+            app,
+            "toggle_click_through",
+            "Toggle Click-Through",
+            true,
+            None::<&str>,
+        )
+        .map_err(|e| format!("Failed to build tray click-through item: {}", e))?;
         let settings_item = MenuItem::with_id(app, "open_settings", "Settings", true, None::<&str>)
             .map_err(|e| format!("Failed to build tray settings item: {}", e))?;
         let exit_item = MenuItem::with_id(app, "exit_app", "Exit", true, None::<&str>)
@@ -97,6 +105,7 @@ impl TrayController {
                 &overlay_item,
                 &gaming_item,
                 &monitoring_item,
+                &click_through_item,
                 &settings_item,
                 &sep2,
                 &exit_item,
@@ -242,6 +251,11 @@ fn handle_tray_menu_action(app: &AppHandle, id: &str) {
                 let _ = app.emit("monitoring_state_changed", next);
             }
         }
+        "toggle_click_through" => {
+            if let Some(state) = app.try_state::<crate::AppState>() {
+                state.desktop.toggle_all_click_through(app, state.gaming.is_active());
+            }
+        }
         "open_settings" => {
             windows::show_main_dashboard(app);
             let _ = app.emit("navigate_to_page", "desktop");
@@ -250,6 +264,7 @@ fn handle_tray_menu_action(app: &AppHandle, id: &str) {
             if let Some(state) = app.try_state::<crate::AppState>() {
                 state.force_quit.store(true, Ordering::SeqCst);
                 state.shutdown.store(true, Ordering::SeqCst);
+                state.shortcuts.shutdown();
                 state.engine.flush_network_history();
             }
             app.exit(0);

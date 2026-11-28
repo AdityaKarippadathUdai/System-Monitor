@@ -766,6 +766,7 @@ const DEFAULT_DESKTOP_CONFIG = {
     startMinimized: false,
     startFloatingWidget: false,
     startBackgroundMonitoring: true,
+    restoreWidgetPosition: true,
     manualGamingModeOnly: false,
   },
   appearance: {
@@ -803,6 +804,7 @@ const DEFAULT_DESKTOP_CONFIG = {
     height: 220,
     opacity: 0.78,
     compactMode: false,
+    textSize: 'md',
     refreshIntervalMs: 1000,
     alwaysOnTop: true,
     clickThrough: true,

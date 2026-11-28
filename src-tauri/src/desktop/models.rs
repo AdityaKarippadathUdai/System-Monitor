@@ -142,12 +142,13 @@ impl Default for BackgroundMonitoringConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct StartupConfig {
     pub launch_at_login: bool,
     pub start_minimized: bool,
     pub start_floating_widget: bool,
     pub start_background_monitoring: bool,
+    pub restore_widget_position: bool,
     pub manual_gaming_mode_only: bool,
 }
 
@@ -158,6 +159,7 @@ impl Default for StartupConfig {
             start_minimized: false,
             start_floating_widget: false,
             start_background_monitoring: true,
+            restore_widget_position: true,
             manual_gaming_mode_only: false,
         }
     }
@@ -249,7 +251,7 @@ pub struct GameOverlayPreference {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct GamingConfig {
     pub enabled: bool,
     pub auto_detect: bool,
@@ -260,6 +262,7 @@ pub struct GamingConfig {
     pub height: u32,
     pub opacity: f32,
     pub compact_mode: bool,
+    pub text_size: String, // "sm" | "md" | "lg"
     pub refresh_interval_ms: u64,
     pub always_on_top: bool,
     pub click_through: bool,
@@ -282,6 +285,7 @@ impl Default for GamingConfig {
             height: 220,
             opacity: 0.78,
             compact_mode: false,
+            text_size: "md".to_string(),
             refresh_interval_ms: 1000,
             always_on_top: true,
             click_through: true,

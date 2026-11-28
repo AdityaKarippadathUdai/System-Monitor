@@ -54,6 +54,7 @@ export const OPTIONAL_CARD_CATALOG: {
   { kind: 'cpu', title: 'CPU', defaultColSpan: 1 },
   { kind: 'memory', title: 'Memory', defaultColSpan: 1 },
   { kind: 'gpu', title: 'GPU', defaultColSpan: 1 },
+  { kind: 'vram', title: 'VRAM', defaultColSpan: 1 },
   { kind: 'disk', title: 'Disk Storage', defaultColSpan: 1 },
   { kind: 'network', title: 'Network', defaultColSpan: 1 },
   { kind: 'temperature', title: 'Thermals', defaultColSpan: 1 },

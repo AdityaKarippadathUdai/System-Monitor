@@ -39,7 +39,7 @@ export const DesktopOverlayWindow: React.FC<DesktopOverlayWindowProps> = ({
 
   const cells = overlayCfg.metrics
     .map((key) => resolveTelemetryMetric(key, overview, battery, fps, latencyMs, tempUnit, 'percent'))
-    .filter((c) => c.supported || c.key !== 'battery');
+    .filter((c) => c.supported || c.key === 'fps');
 
   const opacity = Math.min(1, Math.max(0.2, overlayCfg.opacity));
 

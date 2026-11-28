@@ -46,18 +46,28 @@ export const FloatingWidgetWindow: React.FC<FloatingWidgetWindowProps> = ({
       typeof window !== 'undefined' &&
       window.matchMedia?.('(prefers-color-scheme: dark)').matches);
 
+  const getMetricColor = (key: string): string => {
+    if (key.startsWith('cpu')) return appearance.metricColors.cpu;
+    if (key.startsWith('gpu') || key === 'vram_usage') return appearance.metricColors.gpu;
+    if (key === 'ram_usage') return appearance.metricColors.memory;
+    if (key.startsWith('net')) return appearance.metricColors.network;
+    if (key === 'battery') return appearance.metricColors.battery;
+    if (key === 'fps') return appearance.metricColors.fps;
+    return appearance.accentColor;
+  };
+
   const resolvedMetrics = widgetCfg.metrics
     .map((key) =>
       resolveTelemetryMetric(key, overview, battery, fps, latencyMs, tempUnit, 'combined')
     )
-    .filter((cell) => cell.supported || cell.key !== 'battery'); // auto-hide unsupported hardware metrics like battery on desktop
+    .filter((cell) => cell.supported || cell.key === 'fps'); // auto-hide unsupported hardware metrics
 
   const pinnedCells = widgetCfg.showPinnedSection
     ? storeConfig.pinnedMetrics
         .map((pin) =>
           resolvePinnedMetric(pin, overview, battery, fps, latencyMs, tempUnit)
         )
-        .filter((cell) => cell.supported || cell.key !== 'battery')
+        .filter((cell) => cell.supported || cell.key === 'fps')
     : [];
 
   const opacity = Math.min(1, Math.max(0.25, widgetCfg.opacity));
@@ -209,7 +219,7 @@ export const FloatingWidgetWindow: React.FC<FloatingWidgetWindowProps> = ({
                             ? '#EF4444'
                             : m.severity === 'warning'
                             ? '#F59E0B'
-                            : appearance.accentColor,
+                            : getMetricColor(m.key),
                       }}
                     />
                   </div>

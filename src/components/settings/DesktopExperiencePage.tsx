@@ -3,7 +3,6 @@ import {
   Activity,
   AppWindow,
   CheckCircle2,
-  Cpu,
   Gamepad2,
   Info,
   Keyboard,
@@ -45,6 +44,7 @@ type DesktopSectionId =
   | 'tray'
   | 'background'
   | 'dashboard'
+  | 'pinned'
   | 'appearance'
   | 'shortcuts'
   | 'startup'
@@ -70,7 +70,8 @@ const SECTIONS: { id: DesktopSectionId; label: string; icon: React.ComponentType
   { id: 'overlay', label: 'Desktop Overlay', icon: Layers },
   { id: 'tray', label: 'System Tray', icon: Monitor },
   { id: 'background', label: 'Background Monitoring', icon: Activity },
-  { id: 'dashboard', label: 'Dashboard Customisation', icon: LayoutGrid },
+  { id: 'dashboard', label: 'Dashboard Layout', icon: LayoutGrid },
+  { id: 'pinned', label: 'Pinned Metrics', icon: Pin },
   { id: 'appearance', label: 'Themes & Appearance', icon: Palette },
   { id: 'shortcuts', label: 'Keyboard Shortcuts', icon: Keyboard },
   { id: 'startup', label: 'Startup Behaviour', icon: Power },
@@ -140,6 +141,7 @@ export const DesktopExperiencePage: React.FC = () => {
   const removeExclusion = useGamingStore((s) => s.removeExclusion);
   const addCustomGame = useGamingStore((s) => s.addCustomGame);
   const removeCustomGame = useGamingStore((s) => s.removeCustomGame);
+  const setGameOverride = useGamingStore((s) => s.setGameOverride);
 
   const presets = useLayoutStore((s) => s.presets);
   const activeLayoutId = useLayoutStore((s) => s.activeLayoutId);
@@ -662,7 +664,12 @@ export const DesktopExperiencePage: React.FC = () => {
                 ))}
               </div>
             </div>
+          </div>
+        );
 
+      case 'pinned':
+        return (
+          <div className="space-y-4">
             {/* Pin Important Metrics Manager */}
             <div className="bg-[#0B1118] border border-[#1A2633] rounded-lg p-4 space-y-3">
               <div className="flex items-center gap-2 border-b border-[#14202c] pb-2">
@@ -927,6 +934,44 @@ export const DesktopExperiencePage: React.FC = () => {
               onChange={(val) => void updateAppearance({ backgroundBlur: val })}
               label="Glass Background Blur (Where Supported)"
             />
+
+            <div className="pt-2 border-t border-[#14202c]">
+              <label className="text-[11px] text-slate-400 block mb-2">
+                Metric Accent Colors
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+                {(
+                  [
+                    { key: 'cpu', label: 'CPU' },
+                    { key: 'gpu', label: 'GPU' },
+                    { key: 'memory', label: 'Memory' },
+                    { key: 'network', label: 'Network' },
+                    { key: 'battery', label: 'Battery' },
+                    { key: 'fps', label: 'FPS' },
+                  ] as const
+                ).map((item) => (
+                  <label
+                    key={item.key}
+                    className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded bg-[#05070A] border border-[#14202c] text-xs text-slate-200 cursor-pointer"
+                  >
+                    <span>{item.label}</span>
+                    <input
+                      type="color"
+                      value={config.appearance.metricColors[item.key]}
+                      onChange={(e) =>
+                        void updateAppearance({
+                          metricColors: {
+                            ...config.appearance.metricColors,
+                            [item.key]: e.target.value,
+                          },
+                        })
+                      }
+                      className="w-6 h-5 bg-transparent border-0 cursor-pointer p-0"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
         );
 
@@ -1082,6 +1127,17 @@ export const DesktopExperiencePage: React.FC = () => {
               label="Enable Background Monitoring on Startup"
             />
             <ToggleSwitch
+              checked={config.startup.restoreWidgetPosition}
+              onChange={(val) =>
+                void patchConfig((p) => ({
+                  ...p,
+                  startup: { ...p.startup, restoreWidgetPosition: val },
+                }))
+              }
+              label="Restore Previous Widget Position on Launch"
+              description="Re-opens floating widget at its last saved screen coordinates (or resets to default position when disabled)"
+            />
+            <ToggleSwitch
               checked={config.startup.manualGamingModeOnly}
               onChange={(val) =>
                 void patchConfig((p) => ({
@@ -1163,12 +1219,20 @@ export const DesktopExperiencePage: React.FC = () => {
                   label="Compact Inline HUD Layout"
                 />
                 <ToggleSwitch
+                  checked={config.gaming.alwaysOnTop}
+                  onChange={(val) =>
+                    void patchConfig((p) => ({ ...p, gaming: { ...p.gaming, alwaysOnTop: val } }))
+                  }
+                  label="Always on Top"
+                  description="Keep Gaming HUD pinned above borderless / windowed game surfaces"
+                />
+                <ToggleSwitch
                   checked={config.gaming.clickThrough}
                   onChange={(val) => void setClickThrough('gaming', val)}
                   label="Click-Through Non-Focus-Stealing Overlay"
                 />
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
                   <div>
                     <label className="text-[11px] text-slate-400 block mb-1">HUD Position</label>
                     <select
@@ -1188,6 +1252,49 @@ export const DesktopExperiencePage: React.FC = () => {
                       <option value="top-right">Top Right</option>
                       <option value="bottom-left">Bottom Left</option>
                       <option value="bottom-right">Bottom Right</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Refresh Interval</label>
+                    <select
+                      value={config.gaming.refreshIntervalMs}
+                      onChange={(e) =>
+                        void patchConfig((p) => ({
+                          ...p,
+                          gaming: {
+                            ...p.gaming,
+                            refreshIntervalMs: Number(e.target.value),
+                          },
+                        }))
+                      }
+                      className="w-full bg-[#101720] border border-[#1A2633] rounded px-2 py-1.5 text-xs text-slate-200"
+                    >
+                      <option value={250}>250 ms</option>
+                      <option value={500}>500 ms</option>
+                      <option value={1000}>1s</option>
+                      <option value={2000}>2s</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">HUD Text Size</label>
+                    <select
+                      value={config.gaming.textSize}
+                      onChange={(e) =>
+                        void patchConfig((p) => ({
+                          ...p,
+                          gaming: {
+                            ...p.gaming,
+                            textSize: e.target.value as FontSizeScale,
+                          },
+                        }))
+                      }
+                      className="w-full bg-[#101720] border border-[#1A2633] rounded px-2 py-1.5 text-xs text-slate-200"
+                    >
+                      <option value="sm">Small (SM)</option>
+                      <option value="md">Medium (MD)</option>
+                      <option value="lg">Large (LG)</option>
                     </select>
                   </div>
 
@@ -1226,6 +1333,38 @@ export const DesktopExperiencePage: React.FC = () => {
                     />
                   </div>
                 </div>
+
+                <div className="pt-2 border-t border-[#14202c]">
+                  <label className="text-[11px] text-slate-400 block mb-1.5">
+                    Show / Hide Gaming HUD Metrics
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    {ALL_METRIC_OPTIONS.map((opt) => {
+                      const selected = config.gaming.metrics.includes(opt.key);
+                      return (
+                        <button
+                          key={opt.key}
+                          onClick={() =>
+                            void patchConfig((p) => ({
+                              ...p,
+                              gaming: {
+                                ...p.gaming,
+                                metrics: toggleMetricInList(p.gaming.metrics, opt.key),
+                              },
+                            }))
+                          }
+                          className={`px-2 py-1.5 rounded border text-left text-[11px] cursor-pointer ${
+                            selected
+                              ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-semibold'
+                              : 'bg-[#101720] border-[#14202c] text-slate-400 hover:text-slate-200'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
               {/* Detected Games, Custom Games & Exclusions */}
@@ -1238,27 +1377,47 @@ export const DesktopExperiencePage: React.FC = () => {
                     <span>No active game processes detected right now.</span>
                   ) : (
                     <div className="space-y-1">
-                      {gamingStatus.detectedGames.map((g) => (
-                        <div
-                          key={g.pid}
-                          className="flex items-center justify-between px-2.5 py-1.5 rounded bg-[#05070A] border border-[#14202c]"
-                        >
-                          <div>
-                            <span className="text-slate-200 font-semibold">{g.name}</span>{' '}
-                            <span className="text-slate-500">PID {g.pid} • {g.detectionSource}</span>
-                          </div>
-                          <button
-                            onClick={() =>
-                              void (g.isExcluded
-                                ? removeExclusion(g.name)
-                                : addExclusion(g.name))
-                            }
-                            className="text-[10px] text-amber-400 hover:underline cursor-pointer"
+                      {gamingStatus.detectedGames.map((g) => {
+                        const gameKey = g.name.toLowerCase();
+                        const override = config.gaming.perGameOverrides[gameKey];
+                        const isCompact = override?.compactMode ?? config.gaming.compactMode;
+                        return (
+                          <div
+                            key={g.pid}
+                            className="flex items-center justify-between px-2.5 py-1.5 rounded bg-[#05070A] border border-[#14202c]"
                           >
-                            {g.isExcluded ? 'Remove Exclusion' : 'Exclude'}
-                          </button>
-                        </div>
-                      ))}
+                            <div>
+                              <span className="text-slate-200 font-semibold">{g.name}</span>{' '}
+                              <span className="text-slate-500">PID {g.pid} • {g.detectionSource}</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() =>
+                                  void setGameOverride(gameKey, {
+                                    enabled: override?.enabled ?? true,
+                                    compactMode: !isCompact,
+                                    positionPreset: override?.positionPreset ?? null,
+                                    metrics: override?.metrics ?? null,
+                                  })
+                                }
+                                className="text-[10px] text-blue-400 hover:underline cursor-pointer"
+                              >
+                                {isCompact ? 'HUD: Compact' : 'HUD: Detailed'}
+                              </button>
+                              <button
+                                onClick={() =>
+                                  void (g.isExcluded
+                                    ? removeExclusion(g.name)
+                                    : addExclusion(g.name))
+                                }
+                                className="text-[10px] text-amber-400 hover:underline cursor-pointer"
+                              >
+                                {g.isExcluded ? 'Remove Exclusion' : 'Exclude'}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1397,7 +1556,7 @@ export const DesktopExperiencePage: React.FC = () => {
         </div>
       )}
 
-      {/* 9-Category Navigation + Active Panel */}
+      {/* 10-Category Navigation + Active Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
         <div className="lg:col-span-3 bg-[#0B1118] border border-[#1A2633] rounded-lg p-2 space-y-1">
           {SECTIONS.map((sec) => {

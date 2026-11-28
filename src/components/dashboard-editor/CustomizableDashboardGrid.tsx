@@ -100,6 +100,7 @@ export const CustomizableDashboardGrid: React.FC = () => {
   const cpuSparkline = metricHistory.map((m) => m.cpu);
   const memSparkline = metricHistory.map((m) => m.memory);
   const gpuSparkline = metricHistory.map((m) => m.gpu);
+  const vramSparkline = metricHistory.map((m) => m.vram);
   const diskSparkline = metricHistory.map((m) => m.diskReadMB);
   const netSparkline = metricHistory.map((m) => m.netRxMB);
   const tempSparkline = metricHistory.map((m) => m.cpuTemp ?? 0);
@@ -264,6 +265,47 @@ export const CustomizableDashboardGrid: React.FC = () => {
               {
                 label: 'Core Clock',
                 value: primaryGpu ? formatMhz(primaryGpu.coreClockMhz) : 'N/A',
+              },
+            ]}
+          />
+        );
+      case 'vram':
+        return (
+          <ResourceCard
+            id="overview-vram-card"
+            title="VRAM"
+            subTitle={primaryGpu ? primaryGpu.name : 'Dedicated Video Memory'}
+            value={primaryGpu?.vramUsagePercent ?? 0}
+            valueDisplay={vramDisplay}
+            icon={MonitorCog}
+            colorScheme="cyan"
+            historyData={vramSparkline}
+            onClick={editMode ? undefined : () => setPage('gpu')}
+            details={[
+              {
+                label: 'VRAM Used',
+                value:
+                  primaryGpu?.vramUsedBytes != null
+                    ? formatBytes(primaryGpu.vramUsedBytes)
+                    : 'N/A',
+              },
+              {
+                label: 'VRAM Total',
+                value:
+                  primaryGpu?.vramTotalBytes != null
+                    ? formatBytes(primaryGpu.vramTotalBytes, 0)
+                    : 'N/A',
+              },
+              {
+                label: 'Memory Clock',
+                value: primaryGpu ? formatMhz(primaryGpu.memoryClockMhz) : 'N/A',
+              },
+              {
+                label: 'GPU Load',
+                value:
+                  primaryGpu?.utilizationPercent != null
+                    ? `${primaryGpu.utilizationPercent.toFixed(1)}%`
+                    : 'N/A',
               },
             ]}
           />

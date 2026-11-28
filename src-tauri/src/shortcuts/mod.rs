@@ -210,6 +210,12 @@ impl GlobalShortcutManager {
         self.last_status.lock().unwrap().clone()
     }
 
+    pub fn shutdown(&self) {
+        if let Some(prev_stop) = self.stop_flag.lock().unwrap().take() {
+            prev_stop.store(true, Ordering::SeqCst);
+        }
+    }
+
     pub fn apply(&self, app: &AppHandle, cfg: &ShortcutConfig) -> Result<ShortcutStatus, String> {
         validate_shortcuts(cfg)?;
 

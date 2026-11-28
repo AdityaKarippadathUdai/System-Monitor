@@ -77,6 +77,7 @@ export const DEFAULT_DESKTOP_CONFIG: DesktopConfig = {
     startMinimized: false,
     startFloatingWidget: false,
     startBackgroundMonitoring: true,
+    restoreWidgetPosition: true,
     manualGamingModeOnly: false,
   },
   appearance: {
@@ -114,6 +115,7 @@ export const DEFAULT_DESKTOP_CONFIG: DesktopConfig = {
     height: 220,
     opacity: 0.78,
     compactMode: false,
+    textSize: 'md',
     refreshIntervalMs: 1000,
     alwaysOnTop: true,
     clickThrough: true,

@@ -74,6 +74,7 @@ export interface StartupConfig {
   startMinimized: boolean;
   startFloatingWidget: boolean;
   startBackgroundMonitoring: boolean;
+  restoreWidgetPosition: boolean;
   manualGamingModeOnly: boolean;
 }
 
@@ -123,6 +124,7 @@ export interface GamingConfig {
   height: number;
   opacity: number;
   compactMode: boolean;
+  textSize: FontSizeScale;
   refreshIntervalMs: number;
   alwaysOnTop: boolean;
   clickThrough: boolean;
@@ -232,6 +234,7 @@ export type DashboardCardKind =
   | 'cpu'
   | 'memory'
   | 'gpu'
+  | 'vram'
   | 'disk'
   | 'network'
   | 'temperature'
