@@ -519,6 +519,9 @@ fn main() {
                 let app_close = app_handle.clone();
                 let desktop_close = desktop.clone();
                 let fq_close = force_quit.clone();
+                let shutdown_close = shutdown.clone();
+                let shortcuts_close = shortcuts.clone();
+                let engine_close = engine.clone();
                 main_win.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         if !fq_close.load(Ordering::SeqCst)
@@ -526,6 +529,12 @@ fn main() {
                         {
                             api.prevent_close();
                             desktop_close.hide_main_window(&app_close);
+                        } else if !fq_close.swap(true, Ordering::SeqCst) {
+                            shutdown_close.store(true, Ordering::SeqCst);
+                            shortcuts_close.shutdown();
+                            engine_close.flush_network_history();
+                            desktop::windows::close_all_auxiliary_windows(&app_close);
+                            app_close.exit(0);
                         }
                     }
                 });
@@ -723,25 +732,30 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building SysMon Tauri application");
 
-    app.run(|app_handle, event| {
-        if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+    app.run(|app_handle, event| match event {
+        tauri::RunEvent::ExitRequested { code, api, .. } => {
             if let Some(state) = app_handle.try_state::<AppState>() {
-                if !state.force_quit.load(Ordering::SeqCst)
-                    && state.desktop.should_minimize_to_tray_on_close()
-                {
-                    api.prevent_close();
+                let is_explicit_exit = state.force_quit.load(Ordering::SeqCst) || code.is_some();
+                if !is_explicit_exit && state.desktop.should_minimize_to_tray_on_close() {
+                    api.prevent_exit();
                     return;
                 }
-                state.shutdown.store(true, Ordering::SeqCst);
-                state.shortcuts.shutdown();
-                state.engine.flush_network_history();
-            }
-        } else if let tauri::RunEvent::Exit = event {
-            if let Some(state) = app_handle.try_state::<AppState>() {
+                state.force_quit.store(true, Ordering::SeqCst);
                 state.shutdown.store(true, Ordering::SeqCst);
                 state.shortcuts.shutdown();
                 state.engine.flush_network_history();
             }
         }
+        tauri::RunEvent::Exit => {
+            if let Some(state) = app_handle.try_state::<AppState>() {
+                state.force_quit.store(true, Ordering::SeqCst);
+                state.shutdown.store(true, Ordering::SeqCst);
+                state.shortcuts.shutdown();
+                state.engine.flush_network_history();
+                desktop::windows::close_all_auxiliary_windows(app_handle);
+                state.desktop.tray.shutdown();
+            }
+        }
+        _ => {}
     });
 }

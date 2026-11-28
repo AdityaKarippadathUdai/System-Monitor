@@ -1,4 +1,5 @@
 use super::models::{DesktopConfig, DesktopPlatformCapabilities};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
@@ -141,6 +142,12 @@ fn attach_geometry_listeners(
             }
         }
         WindowEvent::CloseRequested { api, .. } => {
+            let is_force_quit = app_handle
+                .try_state::<crate::AppState>()
+                .is_some_and(|s| s.force_quit.load(Ordering::SeqCst));
+            if is_force_quit {
+                return;
+            }
             // Secondary windows hide instead of quitting the application
             api.prevent_close();
             let _ = win_clone.hide();
@@ -440,4 +447,16 @@ pub fn any_window_visible(app: &AppHandle) -> bool {
             .and_then(|w| w.is_visible().ok())
             .unwrap_or(false)
     })
+}
+
+pub fn close_all_auxiliary_windows(app: &AppHandle) {
+    for label in [
+        WIDGET_WINDOW_LABEL,
+        OVERLAY_WINDOW_LABEL,
+        GAMING_WINDOW_LABEL,
+    ] {
+        if let Some(win) = app.get_webview_window(label) {
+            let _ = win.destroy();
+        }
+    }
 }

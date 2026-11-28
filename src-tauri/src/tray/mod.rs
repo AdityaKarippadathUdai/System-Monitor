@@ -198,6 +198,12 @@ impl TrayController {
         };
         let _ = h.tray.set_tooltip(Some(tooltip));
     }
+
+    pub fn shutdown(&self) {
+        if let Ok(mut guard) = self.handles.lock() {
+            *guard = None;
+        }
+    }
 }
 
 fn handle_tray_menu_action(app: &AppHandle, id: &str) {
@@ -267,6 +273,7 @@ fn handle_tray_menu_action(app: &AppHandle, id: &str) {
                 state.shortcuts.shutdown();
                 state.engine.flush_network_history();
             }
+            windows::close_all_auxiliary_windows(app);
             app.exit(0);
         }
         _ => {}

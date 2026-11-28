@@ -1,5 +1,7 @@
 use super::models::{BatteryStats, DesktopPlatformCapabilities};
+#[cfg(target_os = "linux")]
 use std::fs;
+#[cfg(target_os = "linux")]
 use std::path::Path;
 
 pub fn detect_desktop_capabilities() -> DesktopPlatformCapabilities {
